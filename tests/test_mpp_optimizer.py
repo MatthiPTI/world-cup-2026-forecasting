@@ -222,6 +222,50 @@ def test_underscore_keys_stripped_from_match_points():
     assert result_with_meta["points_manquants"] is False
 
 
+# ──────────────────────── value_margin (garde anti-variance) ──────────────────
+
+
+def test_value_margin_blocks_coinflip_outsider():
+    """Un outsider dont l'EV ne dépasse que marginalement le pick sûr est rejeté
+    quand value_margin > ratio des EV (cas Germany-Curaçao : nul à 8 %)."""
+    matrix = _poisson_matrix(3.2, 0.5)  # gros favori domicile
+    # Nul payé très cher : EV(nul) légèrement > EV(home) en EV pure
+    match_points = {"home": 15, "draw": 179, "away": 222}
+    pure = compute_match_ev(matrix, match_points=match_points, value_margin=1.0)
+    guarded = compute_match_ev(matrix, match_points=match_points, value_margin=1.15)
+    if pure["issue"] != "home":  # l'EV pure choisit bien l'outsider
+        assert guarded["issue"] == "home", "La marge doit ramener au pick sûr"
+        assert guarded["est_value"] is False
+        assert guarded["ev"] == guarded["ev_safe"]
+
+
+def test_value_margin_keeps_clear_value_pick():
+    """Un vrai pick de valeur (EV outsider >> EV safe) survit à la marge."""
+    matrix = _poisson_matrix(1.5, 0.8)
+    match_points = {"home": 50, "draw": 100, "away": 300}
+    result = compute_match_ev(matrix, match_points=match_points, value_margin=1.15)
+    assert result["issue"] == "away", "EV away ≈ 60+ vs home ≈ 28 : doit passer la marge"
+    assert result["est_value"] is True
+    assert result["ev"] >= 1.15 * result["ev_safe"]
+
+
+def test_value_margin_default_is_pure_ev():
+    """value_margin=1.0 (défaut de la fonction) = comportement EV pure inchangé."""
+    matrix = _poisson_matrix(2.0, 0.9)
+    match_points = {"home": 40, "draw": 130, "away": 180}
+    r = compute_match_ev(matrix, match_points=match_points)
+    ev_grid_max = r["ev"]
+    assert ev_grid_max >= r["ev_safe"] - 1e-9
+
+
+def test_ev_safe_always_reported():
+    matrix = _poisson_matrix(1.5, 1.0)
+    with_pts = compute_match_ev(matrix, match_points={"home": 50, "draw": 120, "away": 150})
+    without = compute_match_ev(matrix)
+    assert "ev_safe" in with_pts and with_pts["ev_safe"] > 0
+    assert "ev_safe" in without
+
+
 # ─────────────────────────────── decide_double ────────────────────────────────
 
 def _state_fresh():

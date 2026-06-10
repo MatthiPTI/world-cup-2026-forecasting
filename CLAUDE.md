@@ -21,6 +21,13 @@ uv run --env-file .env mpp-predict --model bayes --confirm-double
 # Correction Dixon-Coles des nuls (opt-in, à calibrer par back-test)
 uv run --env-file .env mpp-predict --model bayes --dc-rho -0.1
 
+# Recalculer les picks après mise à jour des cotes (SANS refit du modèle, ~1 s)
+uv run --env-file .env mpp-optimize
+uv run --env-file .env mpp-optimize --value-margin 1.0   # EV pure, sans garde anti-variance
+
+# Site local de comparaison (modèle vs mes pronos vs collègues)
+uv run --env-file .env mpp-site
+
 # Run all tests
 uv run pytest
 

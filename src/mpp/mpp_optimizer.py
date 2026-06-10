@@ -47,6 +47,7 @@ def compute_match_ev(
     matrix: np.ndarray,
     match_points: dict | None = None,
     exact_bonus: int = EXACT_BONUS,
+    value_margin: float = 1.0,
 ) -> dict:
     """Return EV-optimal MPP prediction for a score probability matrix.
 
@@ -61,10 +62,15 @@ def compute_match_ev(
         matrix: n×n array where M[i,j] = P(home scores i, away scores j).
         match_points: {"home": int, "draw": int, "away": int} MPP points per outcome.
         exact_bonus: Bonus points added when exact score is correct (default 20).
+        value_margin: Anti-variance guard. An outsider issue is only chosen if
+            its EV ≥ value_margin × EV(best pick within the most probable issue).
+            1.0 = pure EV max ; 1.15 = l'outsider doit rapporter ≥15 % de plus.
+            Évite les picks "coin-flip" (EV quasi égales, probabilité effondrée).
 
     Returns dict:
         score          "a-b" best predicted score string
         ev             expected value of that prediction
+        ev_safe        EV of the best pick within the most probable issue
         issue          "home" | "draw" | "away"
         points_issue   int points for chosen outcome (None in fallback)
         proba_issue    P(chosen outcome)
@@ -97,6 +103,7 @@ def compute_match_ev(
         return {
             "score": f"{bi}-{bj}",
             "ev": float(matrix[bi, bj]),
+            "ev_safe": float(matrix[bi, bj]),
             "issue": issue,
             "points_issue": None,
             "proba_issue": round(proba_issue, 4),
@@ -120,21 +127,39 @@ def compute_match_ev(
 
     ev_grid = pts_grid * p_outcome_grid + exact_bonus * matrix
 
+    most_probable = max(
+        [("home", p_home), ("draw", p_draw), ("away", p_away)], key=lambda x: x[1]
+    )[0]
+
+    # Best pick within the most probable issue (the "safe" pick)
+    safe_mask = {
+        "home": pred_a > pred_b,
+        "draw": pred_a == pred_b,
+        "away": pred_a < pred_b,
+    }[most_probable]
+    safe_flat = int(np.where(safe_mask, ev_grid, -np.inf).argmax())
+    si, sj = np.unravel_index(safe_flat, ev_grid.shape)
+    ev_safe = float(ev_grid[si, sj])
+
+    # Best pick overall (pure EV max)
     best_flat = int(ev_grid.argmax())
     bi, bj = np.unravel_index(best_flat, ev_grid.shape)
     ev = float(ev_grid[bi, bj])
 
     issue = "home" if bi > bj else ("draw" if bi == bj else "away")
+
+    # Anti-variance guard: keep the safe pick unless the outsider's EV clears
+    # the margin. Avoids coin-flip picks (EV +2 % mais proba divisée par 8).
+    if issue != most_probable and ev < value_margin * ev_safe:
+        bi, bj, ev, issue = si, sj, ev_safe, most_probable
+
     proba_issue = p_home if issue == "home" else (p_draw if issue == "draw" else p_away)
     points_issue = int(pts_h if issue == "home" else (pts_d if issue == "draw" else pts_a))
-
-    most_probable = max(
-        [("home", p_home), ("draw", p_draw), ("away", p_away)], key=lambda x: x[1]
-    )[0]
 
     return {
         "score": f"{bi}-{bj}",
         "ev": ev,
+        "ev_safe": ev_safe,
         "issue": issue,
         "points_issue": points_issue,
         "proba_issue": round(proba_issue, 4),
