@@ -15,6 +15,7 @@ dependencies = [
 
 [project.scripts]
 mpp-predict = "mpp.predict:main"
+mpp-site = "mpp.site:main"
 
 [build-system]
 requires = ["setuptools>=68"]

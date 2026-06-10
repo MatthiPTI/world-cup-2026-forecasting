@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MPP — Modèle vs Moi</title>
+<style>
+  :root {
+    --bg: #0f1115; --card: #181b22; --line: #2a2f3a;
+    --txt: #e8eaf0; --muted: #8a93a5;
+    --model: #4f9cf9; --me: #f9a84f; --ok: #3ecf8e; --bad: #e05c5c;
+    --value: #c77dff;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--txt);
+         font: 15px/1.45 -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 24px 16px 80px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin-bottom: 20px; font-size: 13px; }
+
+  .totaux { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 24px; }
+  .tot { background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+         padding: 14px 18px; min-width: 150px; flex: 1; }
+  .tot .lab { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+  .tot .val { font-size: 26px; font-weight: 700; margin-top: 2px; }
+  .tot.model .val { color: var(--model); }
+  .tot.me .val { color: var(--me); }
+  .tot.col .val { color: var(--muted); }
+  .tot input { background: #0f1115; border: 1px solid var(--line); color: var(--txt);
+               border-radius: 6px; padding: 6px 8px; width: 90px; font-size: 18px; font-weight: 700; }
+
+  .datehead { margin: 26px 0 8px; font-size: 13px; color: var(--muted);
+              text-transform: uppercase; letter-spacing: 1px; border-bottom: 1px solid var(--line);
+              padding-bottom: 5px; }
+  .match { background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+           padding: 12px 14px; margin-bottom: 10px;
+           display: grid; grid-template-columns: 1.6fr 1fr 1fr 1fr 0.8fr; gap: 10px; align-items: center; }
+  @media (max-width: 820px) { .match { grid-template-columns: 1fr 1fr; } }
+
+  .teams { font-weight: 600; }
+  .teams .grp { color: var(--muted); font-weight: 400; font-size: 12px; margin-left: 6px; }
+  .probas { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .pts-cote { color: var(--muted); font-size: 12px; }
+
+  .cell .lab { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+  .cell .big { font-size: 18px; font-weight: 700; }
+  .model-pick .big { color: var(--model); }
+  .badge { display: inline-block; font-size: 10px; font-weight: 700; padding: 1px 6px;
+           border-radius: 99px; vertical-align: 2px; margin-left: 6px; }
+  .badge.value { background: rgba(199,125,255,.15); color: var(--value); border: 1px solid var(--value); }
+
+  input.score { width: 64px; background: #0f1115; border: 1px solid var(--line); color: var(--me);
+                font-size: 16px; font-weight: 700; border-radius: 6px; padding: 6px 8px; text-align: center; }
+  input.score.res { color: var(--txt); }
+  input.score::placeholder { color: #4a5160; font-weight: 400; }
+  input.score.invalid { border-color: var(--bad); }
+
+  .gain { font-size: 13px; }
+  .gain b { font-size: 15px; }
+  .gain .m { color: var(--model); } .gain .p { color: var(--me); }
+  .zero { color: var(--bad); } .win { color: var(--ok); }
+
+  .save-state { position: fixed; bottom: 14px; right: 16px; background: var(--card);
+                border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px;
+                font-size: 12px; color: var(--muted); opacity: 0; transition: opacity .3s; }
+  .save-state.show { opacity: 1; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>⚽ MPP 2026 — Modèle vs Moi</h1>
+  <div class="sub">
+    Prono du modèle = colonne bleue (badge <span style="color:var(--value)">VALUE</span> quand il ne joue pas
+    le favori). Saisis ton score, puis le résultat réel après le match : les points MPP
+    (points de l'issue + 20 si score exact) se calculent tout seuls quand les cotes du match sont
+    dans <code>mpp_points.json</code>.
+  </div>
+
+  <div class="totaux">
+    <div class="tot model"><div class="lab">Modèle</div><div class="val" id="tot-model">–</div></div>
+    <div class="tot me"><div class="lab">Moi</div><div class="val" id="tot-me">–</div></div>
+    <div class="tot col"><div class="lab">Moyenne collègues</div>
+      <div class="val"><input id="col-avg" type="number" min="0" placeholder="–"></div></div>
+    <div class="tot"><div class="lab">Matchs joués / scorés</div><div class="val" id="tot-count">–</div></div>
+  </div>
+
+  <div id="matches"></div>
+</div>
+<div class="save-state" id="save-state">Enregistré ✓</div>
+
+<script>
+let DATA = null;
+let SAISIE = { mes_scores: {}, resultats: {}, score_moyen_collegues: null };
+const RE_SCORE = /^\s*(\d+)\s*-\s*(\d+)\s*$/;
+
+function parseScore(s) {
+  const m = RE_SCORE.exec(s || "");
+  return m ? [parseInt(m[1]), parseInt(m[2])] : null;
+}
+function outcome([a, b]) { return a > b ? "home" : (a < b ? "away" : "draw"); }
+
+function cotesOf(key) {
+  const p = (DATA.points || {})[key];
+  if (!p) return null;
+  const h = +p.home || 0, d = +p.draw || 0, a = +p.away || 0;
+  return (h > 0 && d > 0 && a > 0) ? { home: h, draw: d, away: a } : null;
+}
+
+// Points MPP réels : points de l'issue si issue correcte (0 sinon), +20 si score exact.
+function mppPoints(predStr, actualStr, cotes) {
+  const pred = parseScore(predStr), act = parseScore(actualStr);
+  if (!pred || !act || !cotes) return null;
+  let pts = 0;
+  if (outcome(pred) === outcome(act)) pts += cotes[outcome(act)];
+  if (pred[0] === act[0] && pred[1] === act[1]) pts += 20;
+  return pts;
+}
+
+let saveTimer = null;
+function scheduleSave() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(async () => {
+    await fetch("/api/save", { method: "POST", body: JSON.stringify(SAISIE) });
+    const el = document.getElementById("save-state");
+    el.classList.add("show");
+    setTimeout(() => el.classList.remove("show"), 1200);
+  }, 500);
+}
+
+function recompute() {
+  let totModel = 0, totMe = 0, played = 0, scorable = 0;
+  for (const m of DATA.predictions) {
+    const key = `${m.team_a} vs ${m.team_b}`;
+    const cotes = cotesOf(key);
+    const res = SAISIE.resultats[key];
+    const gm = mppPoints(m.best_mpp_score, res, cotes);
+    const gp = mppPoints(SAISIE.mes_scores[key], res, cotes);
+    if (parseScore(res)) { played++; if (cotes) scorable++; }
+    if (gm !== null) totModel += gm;
+    if (gp !== null) totMe += gp;
+    const cell = document.getElementById("gain-" + key);
+    if (cell) {
+      if (!parseScore(res)) cell.innerHTML = '<span style="color:var(--muted)">—</span>';
+      else if (!cotes) cell.innerHTML = '<span style="color:var(--muted)" title="Cotes absentes de mpp_points.json">cotes ?</span>';
+      else cell.innerHTML =
+        `<div class="m">Modèle <b class="${gm > 0 ? "win" : "zero"}">${gm}</b></div>` +
+        `<div class="p">Moi <b class="${gp === null ? "" : (gp > 0 ? "win" : "zero")}">${gp === null ? "–" : gp}</b></div>`;
+    }
+  }
+  document.getElementById("tot-model").textContent = totModel;
+  document.getElementById("tot-me").textContent = totMe;
+  document.getElementById("tot-count").textContent = `${played} / ${scorable}`;
+}
+
+function scoreInput(cls, key, store, placeholder) {
+  const inp = document.createElement("input");
+  inp.className = "score " + cls;
+  inp.placeholder = placeholder;
+  inp.value = SAISIE[store][key] || "";
+  inp.addEventListener("input", () => {
+    const v = inp.value.trim();
+    inp.classList.toggle("invalid", v !== "" && !parseScore(v));
+    if (v === "") delete SAISIE[store][key]; else SAISIE[store][key] = v;
+    recompute(); scheduleSave();
+  });
+  return inp;
+}
+
+function render() {
+  const root = document.getElementById("matches");
+  root.innerHTML = "";
+  let lastDate = null;
+  for (const m of DATA.predictions) {
+    const key = `${m.team_a} vs ${m.team_b}`;
+    if (m.date !== lastDate) {
+      lastDate = m.date;
+      const h = document.createElement("div");
+      h.className = "datehead";
+      h.textContent = new Date(m.date + "T12:00:00").toLocaleDateString("fr-FR",
+        { weekday: "long", day: "numeric", month: "long" });
+      root.appendChild(h);
+    }
+    const cotes = cotesOf(key);
+    const card = document.createElement("div");
+    card.className = "match";
+
+    const teams = document.createElement("div");
+    teams.className = "teams";
+    teams.innerHTML = `${m.team_a} – ${m.team_b}<span class="grp">Gr. ${m.group}</span>
+      <div class="probas">${Math.round(m.win_a_prob*100)}% / ${Math.round(m.draw_prob*100)}% / ${Math.round(m.win_b_prob*100)}%
+      &nbsp;·&nbsp; xG ${m.xg_a}–${m.xg_b}</div>
+      <div class="pts-cote">${cotes ? `pts : ${cotes.home} / ${cotes.draw} / ${cotes.away}` : "cotes non saisies"}</div>`;
+
+    const model = document.createElement("div");
+    model.className = "cell model-pick";
+    const valueBadge = m.mpp_est_value ? '<span class="badge value">VALUE</span>' : "";
+    model.innerHTML = `<div class="lab">Modèle</div><div class="big">${m.best_mpp_score}${valueBadge}</div>`;
+
+    const mine = document.createElement("div");
+    mine.className = "cell";
+    mine.innerHTML = '<div class="lab">Moi</div>';
+    mine.appendChild(scoreInput("", key, "mes_scores", "ex 2-1"));
+
+    const result = document.createElement("div");
+    result.className = "cell";
+    result.innerHTML = '<div class="lab">Résultat réel</div>';
+    result.appendChild(scoreInput("res", key, "resultats", "?-?"));
+
+    const gain = document.createElement("div");
+    gain.className = "gain";
+    gain.id = "gain-" + key;
+
+    card.append(teams, model, mine, result, gain);
+    root.appendChild(card);
+  }
+}
+
+async function init() {
+  const r = await fetch("/api/data");
+  DATA = await r.json();
+  SAISIE = Object.assign({ mes_scores: {}, resultats: {}, score_moyen_collegues: null },
+                         DATA.saisie || {});
+  const col = document.getElementById("col-avg");
+  if (SAISIE.score_moyen_collegues != null) col.value = SAISIE.score_moyen_collegues;
+  col.addEventListener("input", () => {
+    SAISIE.score_moyen_collegues = col.value === "" ? null : +col.value;
+    scheduleSave();
+  });
+  render();
+  recompute();
+}
+init();
+</script>
+</body>
+</html>
