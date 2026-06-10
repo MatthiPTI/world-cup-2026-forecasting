@@ -1,0 +1,81 @@
+{
+  "_doc": {
+    "attack": "Multiplie les buts espérés de l'équipe. 0.8 = -20%, 1.1 = +10%",
+    "defense": "Multiplie les buts que l'adversaire marque contre elle. 1.2 = défense fragilisée",
+    "note": "Champ libre pour documenter la raison"
+  },
+
+  "_global_scoring_boost": 1.15,
+  "_global_scoring_boost_note": "Première CdM à 48 équipes : écarts de niveau plus marqués qu'à l'accoutumée → plus de buts sur les gros écarts. Cible : ~2.6 xG/match vs 2.51 historique (64 équipes).",
+
+  "_section_penalites": "Équipes surévaluées — calendriers mous gonflent les paramètres du modèle",
+
+  "New Zealand": {
+    "attack": 0.65,
+    "note": "OFC = confédération la plus faible. Modèle brut : attack=1.13 gonflé par victoires vs minnows Pacifique (Fidji, Îles Salomon…)"
+  },
+  "Jordan": {
+    "attack": 0.78,
+    "note": "AFC qualifs vs oppositions très faibles (Yémen, Oman, Malaisie). Modèle brut : attack=0.95 surestimé"
+  },
+  "Haiti": {
+    "attack": 0.78,
+    "note": "CONCACAF soft schedule. Modèle brut : attack=0.82 gonflé vs nations caribéennes"
+  },
+  "Canada": {
+    "attack": 0.85,
+    "note": "CONCACAF soft schedule. Modèle brut : attack=0.89 surestimé"
+  },
+  "United States": {
+    "attack": 0.87,
+    "note": "CONCACAF soft. Modèle brut : attack=0.84 légèrement surestimé"
+  },
+  "Mexico": {
+    "attack": 0.88,
+    "note": "CONCACAF soft. Modèle brut : attack=0.87 légèrement surestimé"
+  },
+  "South Korea": {
+    "attack": 0.88,
+    "note": "AFC calendrier mixte. Modèle brut : attack=0.90 légèrement gonflé"
+  },
+  "Japan": {
+    "attack": 0.88,
+    "note": "AFC schedule — sous-groupes qualifs faciles. Modèle brut : attack=0.79 = 4e mondial, légèrement surestimé"
+  },
+  "Uzbekistan": {
+    "attack": 0.82,
+    "defense": 1.25,
+    "note": "AFC faibles adversaires (Kirghizstan×4, Turkménistan×3…). Attack ET défense tous deux surestimés"
+  },
+  "Curaçao": {
+    "attack": 0.78,
+    "note": "CONCACAF soft schedule. Modèle brut : attack=0.62, gonflé vs nations caribéennes faibles"
+  },
+
+  "_section_bonus": "Équipes sous-évaluées — bon bilan sur calendriers difficiles",
+
+  "Argentina": {
+    "attack": 1.30,
+    "note": "Champions du monde, CONMEBOL = qual la plus dure. Modèle brut : attack=0.45 sous-estimé"
+  },
+  "Brazil": {
+    "attack": 1.30,
+    "note": "CONMEBOL = qualifs les plus dures (6e sur 10 en qualifs mais talents offensifs réels). Modèle brut : attack=0.24 très bas"
+  },
+  "Uruguay": {
+    "attack": 1.10,
+    "note": "CONMEBOL tough (joue vs Argentine, Brésil, Colombie). Modèle brut : attack=0.01 = quasi-moyenne mondiale, sous-estimé"
+  },
+  "Ecuador": {
+    "attack": 1.20,
+    "note": "CONMEBOL tough, qualifié 4e. Modèle brut : attack=-0.35 = trop pénalisé par adversaires CONMEBOL difficiles"
+  },
+  "Belgium": {
+    "attack": 1.10,
+    "note": "Calendrier UEFA le plus dur du dataset (sos=-0.35). Modèle brut : attack=0.54 sous-estimé"
+  },
+  "Germany": {
+    "attack": 1.08,
+    "note": "UEFA tough schedule, Nations League exigeante. Modèle brut : attack=0.71 légèrement sous-estimé"
+  }
+}
