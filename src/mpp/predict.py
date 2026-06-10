@@ -79,11 +79,11 @@ def _print_adjustments(global_boost: float, adjustments: dict) -> None:
     print()
 
 
-def _build_model(model_type: str, bayes_inference: str):
+def _build_model(model_type: str, bayes_inference: str, dc_rho: float = 0.0):
     if model_type == "bayes":
         from mpp.bayesian_model import BayesianHierarchicalModel
         return BayesianHierarchicalModel(
-            draws=1000, tune=1000, chains=4, inference=bayes_inference
+            draws=1000, tune=1000, chains=4, inference=bayes_inference, rho=dc_rho
         )
     return DixonColesModel(reg=0.3)
 
@@ -155,6 +155,20 @@ def main() -> None:
         default=None,
         help="Reference date YYYY-MM-DD for ×2 optimizer (default: today)",
     )
+    parser.add_argument(
+        "--confirm-double",
+        action="store_true",
+        help="Enregistre l'utilisation du jeton ×2 dans mpp_state.json "
+             "(à passer UNE FOIS, après avoir réellement joué le ×2 dans l'app)",
+    )
+    parser.add_argument(
+        "--dc-rho",
+        type=float,
+        default=0.0,
+        help="Correction Dixon-Coles des scores bas pour le modèle bayésien "
+             "(ex: -0.1 augmente 0-0/1-1, diminue 1-0/0-1 ; défaut 0.0 = off, "
+             "à calibrer par back-test)",
+    )
     args = parser.parse_args()
 
     if args.model == "bayes" and args.bayes_inference == "map":
@@ -207,7 +221,9 @@ def main() -> None:
         )
     print(f"Loaded {len(matches)} matches for training.\n")
 
-    model = _build_model(args.model, args.bayes_inference)
+    model = _build_model(args.model, args.bayes_inference, dc_rho=args.dc_rho)
+    if args.dc_rho != 0.0 and args.model == "bayes":
+        print(f"Correction Dixon-Coles active : rho={args.dc_rho}\n")
 
     if args.model == "bayes":
         from mpp.bayesian_model import BayesianHierarchicalModel
@@ -272,7 +288,9 @@ def main() -> None:
 
     # ---- MPP optimizer ----
     ref_str = reference_date.isoformat()
-    results, double_decision = run_optimizer(results, ref_str, STATE_FILE)
+    results, double_decision = run_optimizer(
+        results, ref_str, STATE_FILE, confirm_double=args.confirm_double
+    )
 
     print(f"Jeton ×2 : {double_decision['recommendation']}")
     print(f"  {double_decision['note']}\n")

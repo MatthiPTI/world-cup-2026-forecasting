@@ -298,3 +298,47 @@ def test_confederation_shrinkage():
         f"Expected Bayesian shrinkage on Curaçao: "
         f"bayes gap={bay_gap:.3f} should be < dc gap={dc_gap:.3f}"
     )
+
+
+# ────────────────────── dixon_coles_correction (pure numpy) ───────────────────
+
+from mpp.bayesian_model import dixon_coles_correction  # noqa: E402
+
+from scipy.stats import poisson as _poisson  # noqa: E402
+
+
+def _indep_matrix(la: float, lb: float, n: int = 9) -> np.ndarray:
+    g = np.arange(n)
+    m = np.outer(_poisson.pmf(g, la), _poisson.pmf(g, lb))
+    return m / m.sum()
+
+
+def test_dc_correction_rho_zero_is_identity():
+    m = _indep_matrix(1.5, 1.1)
+    out = dixon_coles_correction(m, 1.5, 1.1, rho=0.0)
+    assert np.allclose(out, m)
+
+
+def test_dc_correction_negative_rho_boosts_draws():
+    """rho < 0 doit augmenter P(0-0) et P(1-1) et diminuer P(1-0)/P(0-1)."""
+    la, lb = 1.4, 1.2
+    m = _indep_matrix(la, lb)
+    out = dixon_coles_correction(m, la, lb, rho=-0.1)
+    assert out[0, 0] > m[0, 0]
+    assert out[1, 1] > m[1, 1]
+    assert out[1, 0] < m[1, 0]
+    assert out[0, 1] < m[0, 1]
+
+
+def test_dc_correction_matrix_still_normalized():
+    la, lb = 2.0, 0.8
+    out = dixon_coles_correction(_indep_matrix(la, lb), la, lb, rho=-0.12)
+    assert abs(out.sum() - 1.0) < 1e-12
+    assert (out >= 0).all()
+
+
+def test_dc_correction_increases_total_draw_prob():
+    la, lb = 1.3, 1.3
+    m = _indep_matrix(la, lb)
+    out = dixon_coles_correction(m, la, lb, rho=-0.1)
+    assert np.trace(out) > np.trace(m), "rho négatif doit augmenter P(nul) globale"

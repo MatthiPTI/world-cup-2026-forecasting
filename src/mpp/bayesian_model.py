@@ -30,6 +30,33 @@ def _a(x: object) -> np.ndarray:
     return np.asarray(x).ravel()
 
 
+def dixon_coles_correction(
+    matrix: np.ndarray, lambda_a: float, lambda_b: float, rho: float
+) -> np.ndarray:
+    """Apply the Dixon-Coles low-score adjustment to an independent-Poisson matrix.
+
+    Independent Poisson underestimates draws and low scores. The DC tau factors
+    reweight the four low-score cells (typical rho ≈ -0.05 à -0.15) :
+
+        tau(0,0) = 1 - lambda_a*lambda_b*rho
+        tau(1,0) = 1 + lambda_b*rho
+        tau(0,1) = 1 + lambda_a*rho
+        tau(1,1) = 1 - rho
+
+    With rho < 0 : 0-0 et 1-1 montent, 1-0 et 0-1 descendent.
+    The matrix is renormalized to sum to 1. rho=0 returns the matrix unchanged.
+    """
+    if rho == 0.0:
+        return matrix
+    out = matrix.copy()
+    out[0, 0] *= max(1.0 - lambda_a * lambda_b * rho, 0.0)
+    out[1, 0] *= max(1.0 + lambda_b * rho, 0.0)
+    out[0, 1] *= max(1.0 + lambda_a * rho, 0.0)
+    out[1, 1] *= max(1.0 - rho, 0.0)
+    out /= out.sum()
+    return out
+
+
 def _normalize_weights(weights: np.ndarray) -> np.ndarray:
     """Mean-normalize weights so their average equals 1.
 
@@ -77,6 +104,7 @@ class BayesianHierarchicalModel:
         tune: int = 500,
         chains: int = 2,
         inference: str = "nuts",
+        rho: float = 0.0,
     ) -> None:
         """
         Args:
@@ -85,6 +113,9 @@ class BayesianHierarchicalModel:
             chains: Parallel chains (NUTS only).
             inference: "nuts" (proper Bayesian, slow), "advi" (variational, medium),
                        or "map" (point estimate, fast — debug only, collapses variances).
+            rho: Dixon-Coles low-score correction applied post-hoc to score
+                matrices (0.0 = off ; typiquement -0.05 à -0.15, à calibrer par
+                back-test). Negative rho increases P(0-0) and P(1-1).
         """
         if not _HAS_PYMC:
             raise ImportError("PyMC is required: uv add pymc arviz")
@@ -92,6 +123,7 @@ class BayesianHierarchicalModel:
         self.tune = tune
         self.chains = chains
         self.inference = inference
+        self.rho = rho
 
         self.teams: list[str] = []
         self._team_idx: dict[str, int] = {}
@@ -337,7 +369,7 @@ class BayesianHierarchicalModel:
         matrix = np.outer(poisson.pmf(g, la), poisson.pmf(g, lb))
         matrix = np.maximum(matrix, 0.0)
         matrix /= matrix.sum()
-        return matrix
+        return dixon_coles_correction(matrix, la, lb, self.rho)
 
     def predict_match(
         self,

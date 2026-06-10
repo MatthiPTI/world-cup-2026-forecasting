@@ -218,8 +218,26 @@ def decide_double(
             "note": f"Jeton ×2 déjà utilisé sur {match} ({date}).",
         }
 
-    today = [p for p in predictions if p.get("date") == reference_date]
-    future = [p for p in predictions if p.get("date", "") > reference_date]
+    # Garde-fou unités mixtes : sans cotes saisies, mpp_ev est une PROBABILITÉ
+    # (~0.2, fallback score modal) alors qu'avec cotes c'est des POINTS (~50-150).
+    # Mélanger les deux casse la logique de percentile → on ne compare que les
+    # matchs dont les points-cote sont réellement saisis.
+    scored = [p for p in predictions if not p.get("mpp_points_manquants", False)]
+    n_unscored_future = sum(
+        1 for p in predictions
+        if p.get("mpp_points_manquants", False) and p.get("date", "") > reference_date
+    )
+
+    if not scored:
+        return {
+            "match_key": None,
+            "recommendation": "SAVE",
+            "note": ("Aucune cote saisie dans mpp_points.json — décision ×2 reportée "
+                     "(les EV fallback ne sont pas comparables)."),
+        }
+
+    today = [p for p in scored if p.get("date") == reference_date]
+    future = [p for p in scored if p.get("date", "") > reference_date]
 
     if not today:
         best_future = max(future, key=lambda p: p["mpp_ev"], default=None)
@@ -236,16 +254,28 @@ def decide_double(
     ev_today = best_today["mpp_ev"]
     mk = f"{best_today['team_a']} vs {best_today['team_b']}"
 
-    # Failsafe: last matchday of group stage
+    # Failsafe : dernière journée du calendrier COMPLET (pas seulement des matchs
+    # avec cotes saisies, sinon on déclencherait USE trop tôt).
     all_dates = sorted({p["date"] for p in predictions})
     last_date = all_dates[-1] if all_dates else reference_date
-    is_last_round = (reference_date == last_date) or not future
+    is_last_round = reference_date == last_date
 
     if is_last_round:
         return {
             "match_key": mk,
             "recommendation": "USE",
             "note": f"Dernière journée — jeton ×2 placé sur {mk} (EV={ev_today:.2f}, failsafe).",
+        }
+
+    if not future:
+        # Des matchs futurs existent mais aucun n'a de cotes saisies : impossible
+        # de comparer. On conserve le jeton plutôt que de le brûler à l'aveugle.
+        return {
+            "match_key": mk,
+            "recommendation": "SAVE",
+            "note": (f"EV aujourd'hui={ev_today:.2f} mais aucune cote saisie pour les "
+                     f"{n_unscored_future} matchs futurs — saisir les cotes à venir dans "
+                     "mpp_points.json pour activer la comparaison."),
         }
 
     future_evs = np.array([p["mpp_ev"] for p in future])
@@ -277,6 +307,7 @@ def run_optimizer(
     predictions: list[dict],
     reference_date: str,
     state_path: Path,
+    confirm_double: bool = False,
 ) -> tuple[list[dict], dict]:
     """Enrich predictions with MPP data and apply ×2 decision.
 
@@ -284,12 +315,30 @@ def run_optimizer(
         predictions: List of match dicts already containing mpp_ev and best_mpp_score.
         reference_date: "YYYY-MM-DD" string.
         state_path: Path to mpp_state.json.
+        confirm_double: When True AND the decision is USE, persist double_used in
+            the state file. Default False so that simply (re)running predictions
+            never burns the token — pass --confirm-double once the ×2 has really
+            been played in the app.
 
     Returns:
         (enriched_predictions, double_decision)
     """
     state = load_state(state_path)
     decision = decide_double(predictions, reference_date, state)
+
+    # Persist state ONLY on explicit confirmation : une simple recommandation
+    # (ou un run de test) ne doit jamais consommer le jeton.
+    if decision["recommendation"] == "USE":
+        if confirm_double:
+            state["double_used"] = True
+            state["double_match"] = decision["match_key"]
+            state["double_date"] = reference_date
+            save_state(state, state_path)
+        else:
+            decision["note"] += (
+                " [Recommandation seulement — état non enregistré. Une fois le ×2 "
+                "réellement joué dans l'app, relancer avec --confirm-double.]"
+            )
 
     for pred in predictions:
         mk = f"{pred['team_a']} vs {pred['team_b']}"
@@ -304,18 +353,5 @@ def run_optimizer(
         else:
             pred["double_reco"] = "NON"
             pred["double_note"] = ""
-
-    # Persist state if we're recommending USE
-    if decision["recommendation"] == "USE":
-        best_today = max(
-            (p for p in predictions if p.get("date") == reference_date),
-            key=lambda p: p["mpp_ev"],
-            default=None,
-        )
-        if best_today:
-            state["double_used"] = True
-            state["double_match"] = decision["match_key"]
-            state["double_date"] = reference_date
-            save_state(state, state_path)
 
     return predictions, decision

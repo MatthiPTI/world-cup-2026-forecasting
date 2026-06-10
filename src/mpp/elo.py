@@ -41,31 +41,43 @@ def _goal_diff_mult(gd: int) -> float:
     return (11 + gd) / 8.0
 
 
-def compute_elo(matches: pd.DataFrame, k_base: float = 20.0) -> dict[str, float]:
+def compute_elo(
+    matches: pd.DataFrame,
+    k_base: float = 20.0,
+    home_advantage: float = 100.0,
+) -> dict[str, float]:
     """Compute World Football Elo ratings chronologically.
 
     Args:
         matches: DataFrame with columns: date, home_team, away_team,
-                 home_score, away_score. Optional column: tournament
-                 (used to determine K importance multiplier).
+                 home_score, away_score. Optional columns: tournament
+                 (used to determine K importance multiplier), neutral
+                 (home advantage is skipped on neutral venues).
         k_base: Base K-factor before importance and goal-diff multipliers.
+        home_advantage: Elo points added to the home team's rating in the
+            expected-score formula (World Football Elo standard: 100).
+            Without it, home teams systematically gain rating they don't
+            deserve, biasing teams that host often.
 
     Returns:
         dict mapping team name → final Elo rating.
     """
     ratings: dict[str, float] = {}
     has_tournament = "tournament" in matches.columns
+    has_neutral = "neutral" in matches.columns
     df = matches.sort_values("date").reset_index(drop=True)
 
     for _, row in df.iterrows():
         home, away = str(row["home_team"]), str(row["away_team"])
         hs, aws_ = int(row["home_score"]), int(row["away_score"])
         tournament = str(row["tournament"]) if has_tournament else ""
+        is_neutral = bool(row["neutral"]) if has_neutral else False
 
         r_h = ratings.get(home, _INITIAL)
         r_a = ratings.get(away, _INITIAL)
 
-        e_h = 1.0 / (1.0 + 10.0 ** ((r_a - r_h) / 400.0))
+        ha = 0.0 if is_neutral else home_advantage
+        e_h = 1.0 / (1.0 + 10.0 ** ((r_a - (r_h + ha)) / 400.0))
 
         w_h = 1.0 if hs > aws_ else (0.0 if hs < aws_ else 0.5)
         w_a = 1.0 - w_h

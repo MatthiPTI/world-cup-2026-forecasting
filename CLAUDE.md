@@ -15,6 +15,12 @@ uv run --env-file .env mpp-predict
 uv run --env-file .env mpp-predict --model bayes --bayes-inference map
 uv run --env-file .env mpp-predict --model bayes
 
+# Confirmer l'utilisation réelle du jeton ×2 (sinon jamais persisté)
+uv run --env-file .env mpp-predict --model bayes --confirm-double
+
+# Correction Dixon-Coles des nuls (opt-in, à calibrer par back-test)
+uv run --env-file .env mpp-predict --model bayes --dc-rho -0.1
+
 # Run all tests
 uv run pytest
 

@@ -28,13 +28,17 @@ def _poisson_matrix(la: float, lb: float, n: int = 9) -> np.ndarray:
     return m / m.sum()
 
 
-def _fake_prediction(date: str, team_a: str, team_b: str, mpp_ev: float) -> dict:
+def _fake_prediction(
+    date: str, team_a: str, team_b: str, mpp_ev: float,
+    points_manquants: bool = False,
+) -> dict:
     return {
         "date": date, "team_a": team_a, "team_b": team_b,
         "mpp_ev": mpp_ev, "group": "A",
         "win_a_prob": 0.5, "draw_prob": 0.25, "win_b_prob": 0.25,
         "xg_a": 1.5, "xg_b": 1.0,
         "best_mpp_score": "1-0",
+        "mpp_points_manquants": points_manquants,
     }
 
 
@@ -270,6 +274,92 @@ def test_no_today_matches():
     preds = [_fake_prediction("2026-06-20", "A", "B", mpp_ev=3.0)]
     result = decide_double(preds, "2026-06-11", _state_fresh())
     assert result["recommendation"] == "SAVE"
+
+
+# ──────────────────── decide_double : unités mixtes (cotes manquantes) ────────
+
+
+def test_double_ignores_unscored_matches():
+    """Les matchs sans cotes (EV = probabilité ~0.2) ne doivent pas être comparés
+    aux matchs avec cotes (EV en points ~50-150)."""
+    preds = [
+        # Aujourd'hui : cotes saisies, EV en points
+        _fake_prediction("2026-06-11", "France", "Iraq", mpp_ev=80.0),
+        # Futur : cotes saisies, EV en points plus faible
+        _fake_prediction("2026-06-15", "A", "B", mpp_ev=40.0),
+        # Futur : SANS cotes — son EV=0.95 (une probabilité) ne doit pas être
+        # interprété comme "EV très faible" dans le percentile
+        _fake_prediction("2026-06-16", "C", "D", mpp_ev=0.95, points_manquants=True),
+    ]
+    result = decide_double(preds, "2026-06-11", _state_fresh())
+    assert result["recommendation"] == "USE", (
+        "80 pts aujourd'hui > 40 pts futurs : le match non coté (0.95) ne doit "
+        "pas polluer la comparaison"
+    )
+
+
+def test_double_all_unscored_defers():
+    """Sans aucune cote saisie, la décision ×2 est reportée (SAVE)."""
+    preds = [
+        _fake_prediction("2026-06-11", "A", "B", mpp_ev=0.25, points_manquants=True),
+        _fake_prediction("2026-06-15", "C", "D", mpp_ev=0.18, points_manquants=True),
+    ]
+    result = decide_double(preds, "2026-06-11", _state_fresh())
+    assert result["recommendation"] == "SAVE"
+    assert "Aucune cote" in result["note"]
+
+
+def test_double_saves_when_future_has_no_cotes_yet():
+    """Aujourd'hui coté mais futur non coté (hors dernière journée) → SAVE,
+    on ne brûle pas le jeton sans pouvoir comparer."""
+    preds = [
+        _fake_prediction("2026-06-11", "France", "Iraq", mpp_ev=80.0),
+        _fake_prediction("2026-06-15", "A", "B", mpp_ev=0.2, points_manquants=True),
+        _fake_prediction("2026-06-16", "C", "D", mpp_ev=0.2, points_manquants=True),
+    ]
+    result = decide_double(preds, "2026-06-11", _state_fresh())
+    assert result["recommendation"] == "SAVE"
+
+
+def test_double_failsafe_still_fires_on_true_last_day():
+    """Dernière journée réelle + match coté aujourd'hui → USE (failsafe)."""
+    preds = [
+        _fake_prediction("2026-06-27", "A", "B", mpp_ev=55.0),
+        _fake_prediction("2026-06-27", "C", "D", mpp_ev=0.2, points_manquants=True),
+    ]
+    result = decide_double(preds, "2026-06-27", _state_fresh())
+    assert result["recommendation"] == "USE"
+
+
+# ──────────────────── run_optimizer : persistance du jeton ────────────────────
+
+
+def test_run_optimizer_does_not_persist_without_confirm():
+    """Une recommandation USE ne doit PAS consommer le jeton sans --confirm-double."""
+    with tempfile.TemporaryDirectory() as tmp:
+        state_path = Path(tmp) / "state.json"
+        preds = [
+            _fake_prediction("2026-06-11", "France", "Iraq", mpp_ev=80.0),
+            _fake_prediction("2026-06-15", "A", "B", mpp_ev=40.0),
+        ]
+        _, decision = run_optimizer(preds, "2026-06-11", state_path)
+        assert decision["recommendation"] == "USE"
+        assert not state_path.exists(), "Sans confirmation, l'état ne doit pas être écrit"
+        assert load_state(state_path)["double_used"] is False
+
+
+def test_run_optimizer_persists_with_confirm():
+    with tempfile.TemporaryDirectory() as tmp:
+        state_path = Path(tmp) / "state.json"
+        preds = [
+            _fake_prediction("2026-06-11", "France", "Iraq", mpp_ev=80.0),
+            _fake_prediction("2026-06-15", "A", "B", mpp_ev=40.0),
+        ]
+        _, decision = run_optimizer(preds, "2026-06-11", state_path, confirm_double=True)
+        assert decision["recommendation"] == "USE"
+        state = load_state(state_path)
+        assert state["double_used"] is True
+        assert "France" in state["double_match"]
 
 
 # ─────────────────────────────── state persistence ────────────────────────────

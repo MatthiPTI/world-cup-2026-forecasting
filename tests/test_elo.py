@@ -90,15 +90,57 @@ def test_goal_diff_multiplier():
     assert r3["A"] - 1500 > r1["A"] - 1500
 
 
-def test_draw_keeps_ratings_near_initial_equal_teams():
-    """A draw between equal teams barely moves the ratings."""
+def test_draw_at_home_penalises_home_team():
+    """With home advantage, a HOME draw between equal teams means the home side
+    underperformed its expectation → it loses a few points (WFE behaviour)."""
     matches = _make_matches([
         {"date": "2024-01-01", "home_team": "A", "away_team": "B",
          "home_score": 1, "away_score": 1, "tournament": "Friendly"},
     ])
     ratings = compute_elo(matches)
-    assert abs(ratings["A"] - 1500) < 1, "Draw between equal teams barely moves ratings"
-    assert abs(ratings["B"] - 1500) < 1
+    assert ratings["A"] < 1500, "Home draw should cost the home team points"
+    assert ratings["B"] > 1500
+
+
+def test_draw_on_neutral_keeps_ratings_near_initial():
+    """On a neutral venue there is no home advantage: a draw between equal
+    teams barely moves the ratings."""
+    matches = _make_matches([
+        {"date": "2024-01-01", "home_team": "A", "away_team": "B",
+         "home_score": 1, "away_score": 1, "tournament": "Friendly",
+         "neutral": True},
+    ])
+    ratings = compute_elo(matches)
+    assert abs(ratings["A"] - 1500) < 1e-9
+    assert abs(ratings["B"] - 1500) < 1e-9
+
+
+def test_home_win_gains_less_than_away_win():
+    """Winning at home is expected → smaller Elo gain than winning away."""
+    base = {
+        "date": "2024-01-01", "home_score": 1, "away_score": 0,
+        "tournament": "Friendly",
+    }
+    home_win = compute_elo(_make_matches([
+        {**base, "home_team": "A", "away_team": "B"},
+    ]))
+    away_win = compute_elo(_make_matches([
+        {**base, "home_team": "B", "away_team": "A", "home_score": 0, "away_score": 1},
+    ]))
+    gain_home = home_win["A"] - 1500
+    gain_away = away_win["A"] - 1500
+    assert gain_away > gain_home, "Away win must be rewarded more than home win"
+
+
+def test_home_advantage_zero_restores_symmetry():
+    """home_advantage=0 reproduces the venue-blind behaviour."""
+    matches = _make_matches([
+        {"date": "2024-01-01", "home_team": "A", "away_team": "B",
+         "home_score": 1, "away_score": 1, "tournament": "Friendly"},
+    ])
+    ratings = compute_elo(matches, home_advantage=0.0)
+    assert abs(ratings["A"] - 1500) < 1e-9
+    assert abs(ratings["B"] - 1500) < 1e-9
 
 
 def test_no_tournament_column_defaults_k():
