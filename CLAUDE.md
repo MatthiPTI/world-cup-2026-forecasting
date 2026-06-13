@@ -28,6 +28,15 @@ uv run --env-file .env mpp-optimize --value-margin 1.0   # EV pure, sans garde a
 # Site local de comparaison (modèle vs mes pronos vs collègues)
 uv run --env-file .env mpp-site
 
+# Back-test walk-forward (validation out-of-sample — la boucle de mesure)
+uv run --env-file .env mpp-backtest                          # Dixon-Coles, 18 derniers mois
+uv run --env-file .env mpp-backtest --apply-adjustments      # mesure l'impact de adjustments.json
+uv run --env-file .env mpp-backtest --start 2023-01-01 --refit-freq 60
+uv run --env-file .env mpp-backtest --model bayes --bayes-inference map   # lent
+# Sorties : data/backtest_metrics.json + data/backtest_predictions.csv
+# Métriques : log-loss / Brier / RPS / accuracy / score exact vs baselines (Elo, base-rate)
+# Diagnostic clé : biais par confédération (bias>0 = surévaluée = calendrier mou)
+
 # Run all tests
 uv run pytest
 

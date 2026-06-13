@@ -116,13 +116,17 @@ class DixonColesModel:
         team_b: str,
         adjustments: dict | None = None,
         global_boost: float = 1.0,
+        neutral: bool = True,
     ) -> tuple[float, float]:
-        """Return (xG_a, xG_b) for a neutral-venue match, with optional manual adjustments.
+        """Return (xG_a, xG_b), with optional manual adjustments.
 
         adjustments keys per team:
           "attack"  (float) — multiplier on goals scored by that team (0.8 = -20%)
           "defense" (float) — multiplier on goals conceded by that team (1.2 = +20% for opponent)
         global_boost: applied equally to both teams (e.g. 1.15 for a high-mismatch tournament)
+        neutral: if False, team_a is treated as the home side and the fitted home
+            advantage is applied to its expected goals. WC2026 fixtures stay neutral;
+            the back-test passes the real venue flag of each historical match.
         """
         N = len(self.teams)
         mu = self.params[2 * N]
@@ -130,6 +134,9 @@ class DixonColesModel:
         ib = self._team_idx[team_b]
         la = float(np.exp(mu + self.params[ia] - self.params[N + ib]))
         lb = float(np.exp(mu + self.params[ib] - self.params[N + ia]))
+
+        if not neutral:
+            la *= float(np.exp(self.params[2 * N + 2]))
 
         if adjustments:
             adj_a = adjustments.get(team_a, {})
@@ -149,13 +156,16 @@ class DixonColesModel:
         max_goals: int = 8,
         adjustments: dict | None = None,
         global_boost: float = 1.0,
+        neutral: bool = True,
     ) -> np.ndarray:
         """Return (max_goals+1)×(max_goals+1) probability matrix.
         matrix[i, j] = P(team_a scores i, team_b scores j).
         """
         N = len(self.teams)
         rho = float(self.params[2 * N + 1])
-        la, lb = self._expected_goals(team_a, team_b, adjustments, global_boost=global_boost)
+        la, lb = self._expected_goals(
+            team_a, team_b, adjustments, global_boost=global_boost, neutral=neutral
+        )
 
         g = np.arange(max_goals + 1)
         matrix = np.outer(poisson.pmf(g, la), poisson.pmf(g, lb))
@@ -176,15 +186,20 @@ class DixonColesModel:
         team_b: str,
         adjustments: dict | None = None,
         global_boost: float = 1.0,
+        neutral: bool = True,
     ) -> dict:
-        """Return prediction dict for a neutral-venue match (team_a vs team_b)."""
-        matrix = self.score_matrix(team_a, team_b, adjustments=adjustments, global_boost=global_boost)
+        """Return prediction dict for team_a vs team_b (neutral venue by default)."""
+        matrix = self.score_matrix(
+            team_a, team_b, adjustments=adjustments, global_boost=global_boost, neutral=neutral
+        )
         win_a = float(np.tril(matrix, -1).sum())   # team_a goals > team_b goals
         draw = float(np.trace(matrix))
         win_b = float(np.triu(matrix, 1).sum())    # team_b goals > team_a goals
 
         ga, gb = np.unravel_index(matrix.argmax(), matrix.shape)
-        la, lb = self._expected_goals(team_a, team_b, adjustments, global_boost=global_boost)
+        la, lb = self._expected_goals(
+            team_a, team_b, adjustments, global_boost=global_boost, neutral=neutral
+        )
 
         return {
             "team_a": team_a,

@@ -17,6 +17,7 @@ dependencies = [
 mpp-predict = "mpp.predict:main"
 mpp-optimize = "mpp.optimize:main"
 mpp-site = "mpp.site:main"
+mpp-backtest = "mpp.backtest:main"
 
 [build-system]
 requires = ["setuptools>=68"]

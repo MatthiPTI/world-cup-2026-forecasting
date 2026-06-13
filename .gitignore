@@ -1,14 +1,19 @@
+# Données (téléchargées / générées)
 data/
+
+# Python
 __pycache__/
 *.pyc
-.venv/
 *.egg-info/
-.pytest_cache/
-dist/
-.DS_Store
 
-.DS_Store
+# Environnements & builds
+.venv/
 build/
+dist/
+
+# Caches outils
 .pytest_cache/
 .ruff_cache/
-__pycache__/
+
+# macOS
+.DS_Store

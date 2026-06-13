@@ -339,11 +339,15 @@ class BayesianHierarchicalModel:
         team_b: str,
         adjustments: dict | None = None,
         global_boost: float = 1.0,
+        neutral: bool = True,
     ) -> tuple[float, float]:
         ia = self._team_idx[team_a]
         ib = self._team_idx[team_b]
         la = float(np.exp(self._mu + self._attack[ia] - self._defense[ib]))
         lb = float(np.exp(self._mu + self._attack[ib] - self._defense[ia]))
+
+        if not neutral:
+            la *= float(np.exp(self._home_adv))
 
         if adjustments:
             adj_a = adjustments.get(team_a, {})
@@ -362,9 +366,10 @@ class BayesianHierarchicalModel:
         max_goals: int = 8,
         adjustments: dict | None = None,
         global_boost: float = 1.0,
+        neutral: bool = True,
     ) -> np.ndarray:
         """Return (max_goals+1)×(max_goals+1) probability matrix P(a=i, b=j)."""
-        la, lb = self._expected_goals(team_a, team_b, adjustments, global_boost)
+        la, lb = self._expected_goals(team_a, team_b, adjustments, global_boost, neutral=neutral)
         g = np.arange(max_goals + 1)
         matrix = np.outer(poisson.pmf(g, la), poisson.pmf(g, lb))
         matrix = np.maximum(matrix, 0.0)
@@ -377,17 +382,20 @@ class BayesianHierarchicalModel:
         team_b: str,
         adjustments: dict | None = None,
         global_boost: float = 1.0,
+        neutral: bool = True,
     ) -> dict:
         """Return prediction dict (same structure as DixonColesModel.predict_match)."""
         matrix = self.score_matrix(
-            team_a, team_b, adjustments=adjustments, global_boost=global_boost
+            team_a, team_b, adjustments=adjustments, global_boost=global_boost, neutral=neutral
         )
         win_a = float(np.tril(matrix, -1).sum())
         draw = float(np.trace(matrix))
         win_b = float(np.triu(matrix, 1).sum())
 
         ga, gb = np.unravel_index(matrix.argmax(), matrix.shape)
-        la, lb = self._expected_goals(team_a, team_b, adjustments, global_boost=global_boost)
+        la, lb = self._expected_goals(
+            team_a, team_b, adjustments, global_boost=global_boost, neutral=neutral
+        )
 
         return {
             "team_a": team_a,
