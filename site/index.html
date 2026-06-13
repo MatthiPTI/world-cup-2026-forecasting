@@ -48,6 +48,7 @@
   .badge { display: inline-block; font-size: 10px; font-weight: 700; padding: 1px 6px;
            border-radius: 99px; vertical-align: 2px; margin-left: 6px; }
   .badge.value { background: rgba(199,125,255,.15); color: var(--value); border: 1px solid var(--value); }
+  .badge.blend { background: rgba(79,201,154,.15); color: #4fc99a; border: 1px solid #4fc99a; }
 
   input.score { width: 64px; background: #0f1115; border: 1px solid var(--line); color: var(--me);
                 font-size: 16px; font-weight: 700; border-radius: 6px; padding: 6px 8px; text-align: center; }
@@ -71,7 +72,8 @@
   <h1>⚽ MPP 2026 — Modèle vs Moi</h1>
   <div class="sub">
     Prono du modèle = colonne bleue (badge <span style="color:var(--value)">VALUE</span> quand il ne joue pas
-    le favori). Saisis ton score, puis le résultat réel après le match : les points MPP
+    le favori ; badge <span style="color:#4fc99a">BLEND</span> quand le pick est tiré vers le marché).
+    Saisis ton score, puis le résultat réel après le match : les points MPP
     (points de l'issue + 20 si score exact) se calculent tout seuls quand les cotes du match sont
     dans <code>mpp_points.json</code>.
   </div>
@@ -194,7 +196,10 @@ function render() {
     const model = document.createElement("div");
     model.className = "cell model-pick";
     const valueBadge = m.mpp_est_value ? '<span class="badge value">VALUE</span>' : "";
-    model.innerHTML = `<div class="lab">Modèle</div><div class="big">${m.best_mpp_score}${valueBadge}</div>`;
+    const blendBadge = m.blended
+      ? `<span class="badge blend" title="Pick tiré vers le marché (${m.blended === "odds" ? "cotes décimales" : "points MPP"})">BLEND</span>`
+      : "";
+    model.innerHTML = `<div class="lab">Modèle</div><div class="big">${m.best_mpp_score}${valueBadge}${blendBadge}</div>`;
 
     const mine = document.createElement("div");
     mine.className = "cell";
