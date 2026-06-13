@@ -26,12 +26,15 @@ uv run --env-file .env mpp-optimize
 uv run --env-file .env mpp-optimize --value-margin 1.0   # EV pure, sans garde anti-variance
 
 # Couche marché — blend modèle/cotes + détection de value bets (SANS refit)
-# Entrée : data/mpp_odds.json (cotes décimales 1/N/2 saisies à la main, 0 = vide)
-uv run --env-file .env mpp-market                        # blend (poids marché 0.6) + value bets
+# Probas marché : cotes décimales data/mpp_odds.json EN PRIORITÉ, sinon repli sur les
+# points data/mpp_points.json (la constante du barème s'annule au dé-vig).
+uv run --env-file .env mpp-market                        # blend + value bets ; MET À JOUR les picks du site
+uv run --env-file .env mpp-market --report-only          # rapport seul, ne touche pas predictions.json
 uv run --env-file .env mpp-market --market-weight 0.4    # plus de poids au modèle
 uv run --env-file .env mpp-market --min-prob 0.15        # value bets plus conservateurs
-# Sorties : data/market_report.csv + data/market_report.json
+# Sorties : data/market_report.csv/json + (par défaut) predictions.json & mpp_pronos.csv blendés.
 # Blend = picks tirés vers le marché (anti-biais calendrier). Edge = modèle PUR vs cotes (EV/Kelly).
+# Workflow : mpp-predict --model bayes  →  mpp-market  →  recharger le site.
 
 # Site local de comparaison (modèle vs mes pronos vs collègues)
 uv run --env-file .env mpp-site

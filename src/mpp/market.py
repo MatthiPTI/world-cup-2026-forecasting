@@ -92,6 +92,21 @@ def market_probs_from_points(points: dict | None) -> dict | None:
     return {"home": float(p[0]), "draw": float(p[1]), "away": float(p[2]), "overround": None}
 
 
+def resolve_market(odds_entry: dict | None, points: dict | None) -> tuple[dict | None, str]:
+    """Probas marché d'un match : vraies cotes en priorité, sinon repli sur les points.
+
+    Renvoie (market, source) où source ∈ {"odds", "points", ""}. Seul "odds" permet
+    le calcul d'edge (EV/Kelly) ; "points" ne sert qu'au blend.
+    """
+    market = devig(odds_entry)
+    if market is not None:
+        return market, "odds"
+    market = market_probs_from_points(points)
+    if market is not None:
+        return market, "points"
+    return None, ""
+
+
 # -------------------------------------------------------------------- blend --
 
 def matrix_to_3way(matrix: np.ndarray) -> dict:
@@ -197,14 +212,7 @@ def build_report(
         model_3way = matrix_to_3way(matrix)
         pts = points_all.get(key)
         odds_entry = odds_all.get(key)
-
-        # Source du marché : vraies cotes en priorité (seules elles permettent l'edge),
-        # sinon repli sur les points MPP (blend uniquement).
-        market = devig(odds_entry)
-        source = "odds" if market is not None else ""
-        if market is None:
-            market = market_probs_from_points(pts)
-            source = "points" if market is not None else ""
+        market, source = resolve_market(odds_entry, pts)
 
         row = {
             "date": pred.get("date", ""),
@@ -302,6 +310,50 @@ def _print_report(rows: list[dict], market_weight: float) -> None:
     print()
 
 
+def apply_blend_to_pipeline(
+    matrices: dict,
+    predictions: list,
+    odds_all: dict,
+    points_all: dict,
+    market_weight: float,
+    value_margin: float,
+) -> int:
+    """Met à jour predictions.json + mpp_pronos.csv avec les picks BLENDÉS.
+
+    C'est ce que lit le site : après ça, les picks affichés sont blendés (tirés vers
+    le marché) pour les matchs avec cotes/points, et restent en modèle pur ailleurs.
+    Renvoie le nombre de matchs blendés.
+    """
+    # Import tardif : évite de charger predict (donc pymc) quand on importe market
+    # pour les tests / le rapport seul.
+    from mpp.predict import apply_match_ev, save_outputs
+
+    n = 0
+    for pred in predictions:
+        key = f"{pred['team_a']} vs {pred['team_b']}"
+        market, source = (None, "")
+        if key in matrices:
+            market, source = resolve_market(odds_all.get(key), points_all.get(key))
+        if market is None:
+            pred["blended"] = ""
+            continue
+        matrix = np.array(matrices[key], dtype=float)
+        blended = blend_3way(matrix_to_3way(matrix), market, market_weight)
+        b_matrix = blend_matrix(matrix, blended)
+        ev = compute_match_ev(b_matrix, match_points=points_all.get(key),
+                              value_margin=value_margin)
+        apply_match_ev(pred, ev)
+        gh, ga = np.unravel_index(b_matrix.argmax(), b_matrix.shape)
+        pred["predicted_score"] = f"{gh}-{ga}"
+        pred["win_a_prob"] = round(blended["home"], 3)
+        pred["draw_prob"] = round(blended["draw"], 3)
+        pred["win_b_prob"] = round(blended["away"], 3)
+        pred["blended"] = source
+        n += 1
+    save_outputs(predictions)
+    return n
+
+
 def main() -> None:
     p = argparse.ArgumentParser(
         description="Couche marché : blend modèle/cotes + détection de value bets."
@@ -311,10 +363,13 @@ def main() -> None:
     p.add_argument("--value-margin", type=float, default=1.15,
                    help="Garde anti-variance des picks (défaut 1.15 ; 1.0 = EV pure).")
     p.add_argument("--min-ev", type=float, default=0.05,
-                   help="EV minimale pour retenir un value bet (défaut 0.05 = +5 %).")
+                   help="EV minimale pour retenir un value bet (défaut 0.05 = +5%%).")
     p.add_argument("--min-prob", type=float, default=0.10,
                    help="Proba modèle minimale pour un value bet (défaut 0.10). "
                         "Filtre les artefacts de longue cote (modèle peu fiable sur la queue).")
+    p.add_argument("--report-only", action="store_true",
+                   help="N'écrit que le rapport marché, sans modifier les picks du site "
+                        "(predictions.json / mpp_pronos.csv).")
     args = p.parse_args()
 
     matrices = load_json(MATRICES_FILE)
@@ -343,7 +398,15 @@ def main() -> None:
         r["value_ev"] = bv["ev"] if bv else ""
     pd.DataFrame(flat).to_csv(DATA_DIR / "market_report.csv", index=False)
     print(f"  → {DATA_DIR/'market_report.json'}")
-    print(f"  → {DATA_DIR/'market_report.csv'}\n")
+    print(f"  → {DATA_DIR/'market_report.csv'}")
+
+    if args.report_only:
+        print("  (--report-only : picks du site inchangés.)\n")
+    else:
+        n = apply_blend_to_pipeline(matrices, predictions, odds_all, points_all,
+                                    args.market_weight, args.value_margin)
+        print(f"  ✓ {n} picks blendés écrits dans predictions.json + mpp_pronos.csv "
+              f"→ recharge le site (Cmd+R).\n")
 
 
 if __name__ == "__main__":
