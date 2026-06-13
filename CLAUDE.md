@@ -25,6 +25,14 @@ uv run --env-file .env mpp-predict --model bayes --dc-rho -0.1
 uv run --env-file .env mpp-optimize
 uv run --env-file .env mpp-optimize --value-margin 1.0   # EV pure, sans garde anti-variance
 
+# Couche marché — blend modèle/cotes + détection de value bets (SANS refit)
+# Entrée : data/mpp_odds.json (cotes décimales 1/N/2 saisies à la main, 0 = vide)
+uv run --env-file .env mpp-market                        # blend (poids marché 0.6) + value bets
+uv run --env-file .env mpp-market --market-weight 0.4    # plus de poids au modèle
+uv run --env-file .env mpp-market --min-prob 0.15        # value bets plus conservateurs
+# Sorties : data/market_report.csv + data/market_report.json
+# Blend = picks tirés vers le marché (anti-biais calendrier). Edge = modèle PUR vs cotes (EV/Kelly).
+
 # Site local de comparaison (modèle vs mes pronos vs collègues)
 uv run --env-file .env mpp-site
 
