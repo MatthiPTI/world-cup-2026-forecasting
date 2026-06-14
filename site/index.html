@@ -223,6 +223,13 @@ function render() {
 async function init() {
   const r = await fetch("/api/data");
   DATA = await r.json();
+  // Affichage chronologique : tri par date (ISO, donc l'ordre texte = l'ordre des
+  // matchs), puis par groupe pour départager les matchs d'un même jour.
+  if (Array.isArray(DATA.predictions)) {
+    DATA.predictions.sort((a, b) =>
+      (a.date || "").localeCompare(b.date || "") ||
+      (a.group || "").localeCompare(b.group || ""));
+  }
   SAISIE = Object.assign({ mes_scores: {}, resultats: {}, score_moyen_collegues: null },
                          DATA.saisie || {});
   const col = document.getElementById("col-avg");
