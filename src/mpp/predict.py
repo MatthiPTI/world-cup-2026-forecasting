@@ -84,7 +84,8 @@ def _build_model(model_type: str, bayes_inference: str, dc_rho: float = 0.0):
     if model_type == "bayes":
         from mpp.bayesian_model import BayesianHierarchicalModel
         return BayesianHierarchicalModel(
-            draws=1000, tune=1000, chains=4, inference=bayes_inference, rho=dc_rho
+            draws=1000, tune=1000, chains=4, inference=bayes_inference, rho=dc_rho,
+            random_seed=0,
         )
     return DixonColesModel(reg=0.3)
 

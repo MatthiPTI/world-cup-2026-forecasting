@@ -273,6 +273,36 @@ def test_no_elo_backward_compatible():
     assert len(model._attack) == 11
 
 
+def test_default_parameterization_depends_on_inference():
+    # Centered suits NUTS (data-rich regime); its MAP is degenerate (sigma → 0).
+    assert BayesianHierarchicalModel(inference="nuts").parameterization == "centered"
+    assert BayesianHierarchicalModel(inference="map").parameterization == "noncentered"
+
+
+@pytest.mark.parametrize("param", ["centered_conf", "centered"])
+def test_alternative_parameterizations_fit(param):
+    # Smoke test only: the model graph builds and predicts (MAP is fast, not meaningful here).
+    model = BayesianHierarchicalModel(inference="map", parameterization=param)
+    model.fit(_mixed_conf_matches())
+    pred = model.predict_match("France", "Japan")
+    assert abs(pred["win_a_prob"] + pred["draw_prob"] + pred["win_b_prob"] - 1) < 0.01
+
+
+def test_unknown_parameterization_rejected():
+    with pytest.raises(ValueError):
+        BayesianHierarchicalModel(parameterization="banana")
+
+
+def test_nuts_reports_diagnostics():
+    model = BayesianHierarchicalModel(
+        inference="nuts", chains=2, draws=100, tune=100, random_seed=0,
+        parameterization="centered_conf",
+    )
+    model.fit(_mixed_conf_matches())
+    assert {"divergences", "max_rhat", "min_ess_bulk", "min_bfmi"} <= set(model.diagnostics)
+    assert model.diagnostics["divergences"] >= 0
+
+
 # --------------------------------------------------------------------------- shrinkage test
 
 
@@ -302,9 +332,9 @@ def test_confederation_shrinkage():
 
 # ────────────────────── dixon_coles_correction (pure numpy) ───────────────────
 
-from mpp.bayesian_model import dixon_coles_correction  # noqa: E402
-
 from scipy.stats import poisson as _poisson  # noqa: E402
+
+from mpp.bayesian_model import dixon_coles_correction  # noqa: E402
 
 
 def _indep_matrix(la: float, lb: float, n: int = 9) -> np.ndarray:

@@ -107,7 +107,10 @@ class DixonColesModel:
         p[:N] -= mean_att
         p[2 * N] += mean_att
         self.params = p
-        print(f"Done. Weighted log-likelihood: {-result.fun:.1f}  rho={p[2*N+1]:.3f}  home_adv={p[2*N+2]:.3f}")
+        print(
+            f"Done. Weighted log-likelihood: {-result.fun:.1f}  "
+            f"rho={p[2*N+1]:.3f}  home_adv={p[2*N+2]:.3f}"
+        )
         return self
 
     def _expected_goals(

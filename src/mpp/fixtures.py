@@ -19,7 +19,8 @@ WC2026_FIXTURES: list[dict] = [
     # ── Group B ──────────────────────────────────────────────────────────────
     {"group": "B", "date": "2026-06-12", "team_a": "Canada", "team_b": "Bosnia and Herzegovina"},
     {"group": "B", "date": "2026-06-13", "team_a": "Qatar", "team_b": "Switzerland"},
-    {"group": "B", "date": "2026-06-18", "team_a": "Switzerland", "team_b": "Bosnia and Herzegovina"},
+    {"group": "B", "date": "2026-06-18",
+     "team_a": "Switzerland", "team_b": "Bosnia and Herzegovina"},
     {"group": "B", "date": "2026-06-18", "team_a": "Canada", "team_b": "Qatar"},
     {"group": "B", "date": "2026-06-24", "team_a": "Switzerland", "team_b": "Canada"},
     {"group": "B", "date": "2026-06-24", "team_a": "Bosnia and Herzegovina", "team_b": "Qatar"},

@@ -1,0 +1,14 @@
+#!/usr/bin/env python3
+"""clang++ shim for PyTensor on recent macOS.
+
+PyTensor (<= 3.3.3) passes "-ld64" on macOS >= 15 to force Xcode's legacy linker.
+clang >= 21 (macOS 27 Command Line Tools) no longer accepts it and parses it as
+"-l d64", so every C compilation fails with "library 'd64' not found".
+This shim drops the flag and forwards everything else to the real clang++.
+
+Enable with:  PYTENSOR_FLAGS=cxx=scripts/clang++-no-ld64   (see .env.example)
+"""
+import os
+import sys
+
+os.execv("/usr/bin/clang++", ["clang++"] + [a for a in sys.argv[1:] if a != "-ld64"])

@@ -25,9 +25,6 @@
   .tot .val { font-size: 26px; font-weight: 700; margin-top: 2px; }
   .tot.model .val { color: var(--model); }
   .tot.me .val { color: var(--me); }
-  .tot.col .val { color: var(--muted); }
-  .tot input { background: #0f1115; border: 1px solid var(--line); color: var(--txt);
-               border-radius: 6px; padding: 6px 8px; width: 90px; font-size: 18px; font-weight: 700; }
 
   .datehead { margin: 26px 0 8px; font-size: 13px; color: var(--muted);
               text-transform: uppercase; letter-spacing: 1px; border-bottom: 1px solid var(--line);
@@ -81,8 +78,6 @@
   <div class="totaux">
     <div class="tot model"><div class="lab">Modèle</div><div class="val" id="tot-model">–</div></div>
     <div class="tot me"><div class="lab">Moi</div><div class="val" id="tot-me">–</div></div>
-    <div class="tot col"><div class="lab">Moyenne collègues</div>
-      <div class="val"><input id="col-avg" type="number" min="0" placeholder="–"></div></div>
     <div class="tot"><div class="lab">Matchs joués / scorés</div><div class="val" id="tot-count">–</div></div>
   </div>
 
@@ -92,7 +87,7 @@
 
 <script>
 let DATA = null;
-let SAISIE = { mes_scores: {}, resultats: {}, score_moyen_collegues: null };
+let SAISIE = { mes_scores: {}, resultats: {} };
 const RE_SCORE = /^\s*(\d+)\s*-\s*(\d+)\s*$/;
 
 function parseScore(s) {
@@ -230,14 +225,8 @@ async function init() {
       (a.date || "").localeCompare(b.date || "") ||
       (a.group || "").localeCompare(b.group || ""));
   }
-  SAISIE = Object.assign({ mes_scores: {}, resultats: {}, score_moyen_collegues: null },
-                         DATA.saisie || {});
-  const col = document.getElementById("col-avg");
-  if (SAISIE.score_moyen_collegues != null) col.value = SAISIE.score_moyen_collegues;
-  col.addEventListener("input", () => {
-    SAISIE.score_moyen_collegues = col.value === "" ? null : +col.value;
-    scheduleSave();
-  });
+  SAISIE = Object.assign({ mes_scores: {}, resultats: {} }, DATA.saisie || {});
+  delete SAISIE.score_moyen_collegues;  // champ retiré (anciennes saisies)
   render();
   recompute();
 }

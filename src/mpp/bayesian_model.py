@@ -105,12 +105,29 @@ class BayesianHierarchicalModel:
         chains: int = 2,
         inference: str = "nuts",
         rho: float = 0.0,
+        target_accept: float = 0.8,
+        random_seed: int | None = None,
+        parameterization: str | None = None,
     ) -> None:
         """
         Args:
             draws: Posterior draws per chain (NUTS/ADVI).
             tune: Tuning steps (NUTS only).
             chains: Parallel chains (NUTS only).
+            target_accept: NUTS target acceptance rate (higher → smaller steps, fewer
+                divergences, slower). 0.8 is the PyMC default.
+            random_seed: Seed for NUTS/ADVI, for reproducible fits.
+            parameterization: "centered" (ZeroSumNormal confederation effects and
+                centered team effects), "centered_conf" (centered confederations,
+                non-centered teams) or "noncentered" (original version). Same model,
+                different geometry. None (default) picks "centered" for NUTS and
+                "noncentered" for MAP/ADVI:
+                  * NUTS: every confederation and team has dozens to thousands of
+                    matches — the data-rich regime where the centered form samples
+                    better. Non-centered gave ~5 % divergent transitions, concentrated
+                    at large tau, and R-hat up to 1.02; centered gives none.
+                  * MAP: the centered joint density is unbounded as sigma → 0 (funnel
+                    tip), so its mode is degenerate and team strengths collapse.
             inference: "nuts" (proper Bayesian, slow), "advi" (variational, medium),
                        or "map" (point estimate, fast — debug only, collapses variances).
             rho: Dixon-Coles low-score correction applied post-hoc to score
@@ -124,6 +141,15 @@ class BayesianHierarchicalModel:
         self.chains = chains
         self.inference = inference
         self.rho = rho
+        if parameterization is None:
+            parameterization = "centered" if inference == "nuts" else "noncentered"
+        if parameterization not in {"noncentered", "centered_conf", "centered"}:
+            raise ValueError(f"Unknown parameterization: {parameterization!r}")
+        self.target_accept = target_accept
+        self.random_seed = random_seed
+        self.parameterization = parameterization
+        # NUTS convergence diagnostics, filled by fit() (empty for MAP/ADVI).
+        self.diagnostics: dict = {}
 
         self.teams: list[str] = []
         self._team_idx: dict[str, int] = {}
@@ -207,21 +233,35 @@ class BayesianHierarchicalModel:
             tau_att = pm.HalfNormal("tau_att", sigma=1.0)
             tau_def = pm.HalfNormal("tau_def", sigma=1.0)
 
-            # Non-centered confederation means; zero-sum enforced by centering
-            conf_att_nc = pm.Normal("conf_att_nc", 0, 1, shape=n_confs)
-            conf_def_nc = pm.Normal("conf_def_nc", 0, 1, shape=n_confs)
-            conf_att = pm.Deterministic(
-                "conf_att", tau_att * (conf_att_nc - pt.mean(conf_att_nc))
-            )
-            conf_def = pm.Deterministic(
-                "conf_def", tau_def * (conf_def_nc - pt.mean(conf_def_nc))
-            )
+            if self.parameterization == "noncentered":
+                # Non-centered confederation means; zero-sum enforced by centering
+                conf_att_nc = pm.Normal("conf_att_nc", 0, 1, shape=n_confs)
+                conf_def_nc = pm.Normal("conf_def_nc", 0, 1, shape=n_confs)
+                conf_att = pm.Deterministic(
+                    "conf_att", tau_att * (conf_att_nc - pt.mean(conf_att_nc))
+                )
+                conf_def = pm.Deterministic(
+                    "conf_def", tau_def * (conf_def_nc - pt.mean(conf_def_nc))
+                )
+            else:
+                # Centered + ZeroSumNormal: each confederation has thousands of matches,
+                # so conf effects are pinned by the data and the non-centered
+                # conf_nc = conf / tau forms a curved ridge in tau (divergences at
+                # large tau). ZeroSumNormal also drops the prior-only mean direction.
+                conf_att = pm.ZeroSumNormal("conf_att", sigma=tau_att, shape=n_confs)
+                conf_def = pm.ZeroSumNormal("conf_def", sigma=tau_def, shape=n_confs)
 
-            # ---- Team-level (non-centered) ----
+            # ---- Team-level ----
             sigma_att = pm.HalfNormal("sigma_att", sigma=0.5)
             sigma_def = pm.HalfNormal("sigma_def", sigma=0.5)
-            att_raw = pm.Normal("att_raw", 0, 1, shape=n_teams)
-            def_raw = pm.Normal("def_raw", 0, 1, shape=n_teams)
+            if self.parameterization == "centered":
+                att_dev = pm.Normal("att_dev", 0, sigma_att, shape=n_teams)
+                def_dev = pm.Normal("def_dev", 0, sigma_def, shape=n_teams)
+            else:
+                att_raw = pm.Normal("att_raw", 0, 1, shape=n_teams)
+                def_raw = pm.Normal("def_raw", 0, 1, shape=n_teams)
+                att_dev = sigma_att * att_raw
+                def_dev = sigma_def * def_raw
 
             # ---- Elo anchoring (optional) ----
             # beta_att/beta_def ~ HalfNormal(1): model learns how much to trust Elo.
@@ -237,10 +277,10 @@ class BayesianHierarchicalModel:
                 elo_def_contrib = pt.zeros(n_teams)
 
             # Global sum-to-zero: absorbs the grand mean into mu (identifiability)
-            attack_unc = elo_att_contrib + conf_att[conf_idx] + sigma_att * att_raw
+            attack_unc = elo_att_contrib + conf_att[conf_idx] + att_dev
             attack = pm.Deterministic("attack", attack_unc - pt.mean(attack_unc))
 
-            defense_unc = elo_def_contrib + conf_def[conf_idx] + sigma_def * def_raw
+            defense_unc = elo_def_contrib + conf_def[conf_idx] + def_dev
             defense = pm.Deterministic("defense", defense_unc - pt.mean(defense_unc))
 
             # ---- Global parameters ----
@@ -261,12 +301,12 @@ class BayesianHierarchicalModel:
         if self.inference == "map":
             with pymc_model:
                 map_result = pm.find_MAP(progressbar=True)
-            self._extract_map_params(map_result, conf_idx)
+            self._extract_map_params(map_result)
 
         elif self.inference == "advi":
             with pymc_model:
-                approx = pm.fit(n=20_000, progressbar=True)
-                self._idata = approx.sample(self.draws)
+                approx = pm.fit(n=20_000, progressbar=True, random_seed=self.random_seed)
+                self._idata = approx.sample(self.draws, random_seed=self.random_seed)
             self._extract_posterior_params()
 
         else:  # nuts (default)
@@ -275,43 +315,24 @@ class BayesianHierarchicalModel:
                     draws=self.draws,
                     tune=self.tune,
                     chains=self.chains,
+                    target_accept=self.target_accept,
+                    random_seed=self.random_seed,
                     progressbar=True,
                 )
             self._extract_posterior_params()
+            self.diagnostics = self._compute_diagnostics()
+            print("NUTS diagnostics: " + ", ".join(f"{k}={v}" for k, v in self.diagnostics.items()))
 
         self._print_top_attacks()
         return self
 
     # ------------------------------------------------------- param extraction --
 
-    def _extract_map_params(self, map_result: dict, conf_idx: np.ndarray) -> None:
-        """Compute attack/defense from MAP free-variable values."""
-        tau_att_val = _f(map_result["tau_att"])
-        tau_def_val = _f(map_result["tau_def"])
-        conf_att_nc_val = _a(map_result["conf_att_nc"])
-        conf_def_nc_val = _a(map_result["conf_def_nc"])
-        sigma_att_val = _f(map_result["sigma_att"])
-        sigma_def_val = _f(map_result["sigma_def"])
-        att_raw_val = _a(map_result["att_raw"])
-        def_raw_val = _a(map_result["def_raw"])
-
-        conf_att_val = tau_att_val * (conf_att_nc_val - conf_att_nc_val.mean())
-        conf_def_val = tau_def_val * (conf_def_nc_val - conf_def_nc_val.mean())
-
-        if self._elo_z is not None:
-            beta_att_val = _f(map_result["beta_att"])
-            beta_def_val = _f(map_result["beta_def"])
-            elo_att = beta_att_val * self._elo_z
-            elo_def = beta_def_val * self._elo_z
-        else:
-            elo_att = np.zeros(len(self.teams))
-            elo_def = np.zeros(len(self.teams))
-
-        attack_unc = elo_att + conf_att_val[conf_idx] + sigma_att_val * att_raw_val
-        defense_unc = elo_def + conf_def_val[conf_idx] + sigma_def_val * def_raw_val
-
-        self._attack = attack_unc - attack_unc.mean()
-        self._defense = defense_unc - defense_unc.mean()
+    def _extract_map_params(self, map_result: dict) -> None:
+        """Read attack/defense from the MAP point (find_MAP also returns Deterministics,
+        so this works for every parameterization)."""
+        self._attack = _a(map_result["attack"])
+        self._defense = _a(map_result["defense"])
         self._attack_std = np.zeros(len(self.teams))
         self._defense_std = np.zeros(len(self.teams))
         self._mu = _f(map_result["mu"])
@@ -330,6 +351,38 @@ class BayesianHierarchicalModel:
         self._defense_std = def_.std(axis=0)
         self._mu = float(post["mu"].values.mean())
         self._home_adv = float(post["home_adv"].values.mean())
+
+    def _compute_diagnostics(self) -> dict:
+        """Summarise NUTS health: divergences, worst R-hat / ESS, E-BFMI, tree-depth hits.
+
+        Rules of thumb (Vehtari et al. 2021): R-hat < 1.01, ESS bulk/tail > 100 per
+        chain, E-BFMI > 0.3, zero divergences. Any divergence means the sampler met
+        curvature it could not follow, so that region of the posterior may be biased.
+        """
+        import arviz as az
+
+        stats = self._idata.sample_stats
+        rhat = az.rhat(self._idata)
+        ess_bulk = az.ess(self._idata, method="bulk")
+        ess_tail = az.ess(self._idata, method="tail")
+        bfmi = az.bfmi(self._idata)
+
+        rhat_by_var = {v: float(np.nanmax(rhat[v].values)) for v in rhat.data_vars}
+        worst_var = max(rhat_by_var, key=rhat_by_var.get)
+        n_samples = int(stats["diverging"].size)
+        n_div = int(stats["diverging"].values.sum())
+        diag = {
+            "divergences": n_div,
+            "divergence_rate": round(n_div / n_samples, 4),
+            "max_rhat": round(rhat_by_var[worst_var], 4),
+            "worst_rhat_var": worst_var,
+            "min_ess_bulk": int(min(np.nanmin(ess_bulk[v].values) for v in ess_bulk.data_vars)),
+            "min_ess_tail": int(min(np.nanmin(ess_tail[v].values) for v in ess_tail.data_vars)),
+            "min_bfmi": round(float(np.min(bfmi["energy"].values)), 3),
+        }
+        if "reached_max_treedepth" in stats:
+            diag["max_treedepth_hits"] = int(stats["reached_max_treedepth"].values.sum())
+        return diag
 
     # ----------------------------------------------------------- predictions --
 

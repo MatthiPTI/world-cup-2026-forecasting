@@ -2,14 +2,19 @@
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 
 from mpp.backtest import (
     _calibration_table,
     _fit_elo_multinomial,
     _predict_elo_multinomial,
     brier_3way,
+    compare_predictors,
+    holm,
     log_loss_3way,
     outcome_index,
+    paired_bootstrap,
+    per_match_losses,
     rps_3way,
     summarise,
 )
@@ -74,3 +79,69 @@ def test_calibration_table_structure():
     outcomes = np.array([0, 0, 1])
     table = _calibration_table(probs, outcomes)
     assert all({"bin", "n", "pred_win_rate", "actual_win_rate", "gap"} <= set(r) for r in table)
+
+
+# ---------------------------------------------------------------- significance --
+
+def test_per_match_losses_average_to_aggregate_metrics():
+    rng = np.random.default_rng(1)
+    probs = rng.dirichlet([2, 1, 2], size=50)
+    outcomes = rng.integers(0, 3, size=50)
+    per = per_match_losses(probs, outcomes)
+    assert all(len(v) == 50 for v in per.values())
+    assert np.isclose(per["log_loss"].mean(), log_loss_3way(probs, outcomes))
+    assert np.isclose(per["brier"].mean(), brier_3way(probs, outcomes))
+    assert np.isclose(per["rps"].mean(), rps_3way(probs, outcomes))
+
+
+def test_paired_bootstrap_identical_predictors_is_null():
+    loss = np.random.default_rng(0).exponential(1.0, 300)
+    res = paired_bootstrap(loss, loss, n_boot=500)
+    assert res["mean_diff"] == 0.0
+    assert res["ci_low"] <= 0.0 <= res["ci_high"]
+    assert res["p_value"] == 1.0
+
+
+def test_paired_bootstrap_detects_consistent_improvement():
+    rng = np.random.default_rng(0)
+    base = rng.exponential(1.0, 400)
+    better = base - 0.05 + rng.normal(0, 0.01, 400)  # A always ~0.05 better
+    res = paired_bootstrap(better, base, n_boot=2000)
+    assert res["ci_high"] < 0
+    assert res["p_value"] < 0.01
+
+
+def test_pairing_beats_unpaired_noise():
+    # Huge shared match-level noise, tiny but consistent edge: only pairing sees it.
+    rng = np.random.default_rng(0)
+    shared = rng.exponential(1.0, 500)
+    a = shared + rng.normal(0, 0.01, 500)
+    b = shared + 0.01 + rng.normal(0, 0.01, 500)
+    assert paired_bootstrap(a, b, n_boot=2000)["ci_high"] < 0
+
+
+def test_cluster_bootstrap_counts_clusters():
+    rng = np.random.default_rng(0)
+    a, b = rng.normal(size=120), rng.normal(size=120)
+    res = paired_bootstrap(a, b, clusters=np.repeat(np.arange(12), 10), n_boot=500)
+    assert res["n_units"] == 12 and res["n"] == 120
+
+
+def test_holm_matches_hand_computation():
+    # p sorted: 0.01, 0.02, 0.04 → ×3, ×2, ×1 → 0.03, 0.04, 0.04 (monotone)
+    assert np.allclose(holm([0.04, 0.01, 0.02]), [0.04, 0.03, 0.04])
+    assert holm([0.9, 0.8]) == [1.0, 1.0]
+    assert holm([]) == []
+
+
+def test_compare_predictors_structure():
+    rng = np.random.default_rng(0)
+    n = 60
+    frame = {"outcome": rng.integers(0, 3, n), "window": np.repeat(np.arange(6), 10)}
+    for name in ("x", "y", "elo"):
+        p = rng.dirichlet([1, 1, 1], size=n)
+        frame.update({f"{name}_home": p[:, 0], f"{name}_draw": p[:, 1], f"{name}_away": p[:, 2]})
+    rows = compare_predictors(pd.DataFrame(frame), ["x", "y", "elo"], n_boot=200)
+    assert len(rows) == 3 * 3  # 3 pairs × 3 metrics
+    assert {"mean_diff", "ci_iid", "ci_cluster", "p_cluster_holm", "mde_80"} <= set(rows[0])
+    assert all(r["p_cluster_holm"] >= r["p_cluster"] for r in rows)

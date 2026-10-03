@@ -17,7 +17,7 @@ CONFEDERATION_MAP: dict[str, str] = {
     "Cyprus": "UEFA", "Estonia": "UEFA", "Faroe Islands": "UEFA", "Latvia": "UEFA",
     "Lithuania": "UEFA", "Luxembourg": "UEFA", "Malta": "UEFA", "Moldova": "UEFA",
     "Turkey": "UEFA", "Kazakhstan": "UEFA", "Liechtenstein": "UEFA",
-    "Andorra": "UEFA", "Gibraltar": "UEFA", "San Marino": "UEFA",
+    "Andorra": "UEFA", "Gibraltar": "UEFA", "San Marino": "UEFA", "Israel": "UEFA",
     # CONMEBOL
     "Brazil": "CONMEBOL", "Argentina": "CONMEBOL", "Colombia": "CONMEBOL",
     "Uruguay": "CONMEBOL", "Ecuador": "CONMEBOL", "Paraguay": "CONMEBOL",
@@ -32,8 +32,14 @@ CONFEDERATION_MAP: dict[str, str] = {
     "Grenada": "CONCACAF", "Dominican Republic": "CONCACAF", "Dominica": "CONCACAF",
     "Suriname": "CONCACAF", "Guyana": "CONCACAF", "Nicaragua": "CONCACAF",
     "Antigua and Barbuda": "CONCACAF", "Saint Lucia": "CONCACAF",
-    "St Kitts and Nevis": "CONCACAF", "St Vincent and the Grenadines": "CONCACAF",
-    "Puerto Rico": "CONCACAF",
+    "Saint Kitts and Nevis": "CONCACAF", "Saint Vincent and the Grenadines": "CONCACAF",
+    "Puerto Rico": "CONCACAF", "Bermuda": "CONCACAF", "Bahamas": "CONCACAF",
+    "Aruba": "CONCACAF", "Anguilla": "CONCACAF", "Montserrat": "CONCACAF",
+    "Cayman Islands": "CONCACAF", "British Virgin Islands": "CONCACAF",
+    "United States Virgin Islands": "CONCACAF", "Turks and Caicos Islands": "CONCACAF",
+    # CONCACAF members outside FIFA (play CONCACAF Nations League)
+    "Martinique": "CONCACAF", "Guadeloupe": "CONCACAF", "French Guiana": "CONCACAF",
+    "Sint Maarten": "CONCACAF", "Saint Martin": "CONCACAF", "Bonaire": "CONCACAF",
     # CAF
     "Morocco": "CAF", "Senegal": "CAF", "Algeria": "CAF", "Egypt": "CAF",
     "Tunisia": "CAF", "Ghana": "CAF", "Cape Verde": "CAF", "Ivory Coast": "CAF",
@@ -62,14 +68,19 @@ CONFEDERATION_MAP: dict[str, str] = {
     "Kyrgyzstan": "AFC", "Turkmenistan": "AFC", "Mongolia": "AFC", "North Korea": "AFC",
     "Chinese Taipei": "AFC", "Palestine": "AFC", "Lebanon": "AFC", "Syria": "AFC",
     "Cambodia": "AFC", "Laos": "AFC", "Maldives": "AFC", "Bhutan": "AFC",
-    "Timor-Leste": "AFC",
+    "Timor-Leste": "AFC", "Taiwan": "AFC", "Hong Kong": "AFC", "Macau": "AFC",
+    "Brunei": "AFC", "Guam": "AFC", "Northern Mariana Islands": "AFC",
     # OFC
     "New Zealand": "OFC", "Papua New Guinea": "OFC", "Solomon Islands": "OFC",
     "Fiji": "OFC", "Vanuatu": "OFC", "Samoa": "OFC", "Tahiti": "OFC",
-    "New Caledonia": "OFC", "Cook Islands": "OFC",
+    "New Caledonia": "OFC", "Cook Islands": "OFC", "Tonga": "OFC", "American Samoa": "OFC",
 }
 
 
 def get_confederation(team: str) -> str:
-    """Return the confederation for a team name, or 'OTHER' if unknown."""
+    """Return the confederation for a team name, or 'OTHER' if unknown.
+
+    'OTHER' is meant for non-FIFA sides (CONIFA etc.) only; a real confederation
+    member landing here is a mapping bug (it becomes a fake pooling group).
+    """
     return CONFEDERATION_MAP.get(team, "OTHER")

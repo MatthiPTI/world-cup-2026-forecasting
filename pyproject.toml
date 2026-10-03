@@ -1,7 +1,9 @@
 [project]
 name = "mpp"
 version = "0.1.0"
-description = "Mon Petit Prono — Moteur de prédiction Coupe du Monde 2026"
+description = "Bayesian hierarchical football forecasting for the 2026 World Cup, with walk-forward back-testing"
+readme = "README.md"
+license = "MIT"
 requires-python = ">=3.11"
 dependencies = [
     "pandas>=2.0",
@@ -21,7 +23,7 @@ mpp-backtest = "mpp.backtest:main"
 mpp-market = "mpp.market:main"
 
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.package-dir]

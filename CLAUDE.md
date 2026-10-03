@@ -40,13 +40,17 @@ uv run --env-file .env mpp-market --min-prob 0.15        # value bets plus conse
 uv run --env-file .env mpp-site
 
 # Back-test walk-forward (validation out-of-sample — la boucle de mesure)
-uv run --env-file .env mpp-backtest                          # Dixon-Coles, 18 derniers mois
+uv run --env-file .env mpp-backtest                          # Dixon-Coles vs Elo, 18 derniers mois
+uv run --env-file .env mpp-backtest --models dixoncoles bayes   # comparaison complète (NUTS, ~15 min)
 uv run --env-file .env mpp-backtest --apply-adjustments      # mesure l'impact de adjustments.json
 uv run --env-file .env mpp-backtest --start 2023-01-01 --refit-freq 60
-uv run --env-file .env mpp-backtest --model bayes --bayes-inference map   # lent
-# Sorties : data/backtest_metrics.json + data/backtest_predictions.csv
+uv run --env-file .env mpp-backtest --models bayes --bayes-inference map   # rapide, debug
+# Tous les modèles sont notés en UN passage sur les mêmes matchs (pertes appariées).
+# Sorties : data/<prefix>_metrics.json + data/<prefix>_predictions.csv (--out-prefix, défaut backtest)
 # Métriques : log-loss / Brier / RPS / accuracy / score exact vs baselines (Elo, base-rate)
+# Significativité : bootstrap apparié (par match + par fenêtre de refit), Holm sur les paires
 # Diagnostic clé : biais par confédération (bias>0 = surévaluée = calendrier mou)
+# Diagnostics NUTS par fenêtre (divergences, R-hat, ESS, E-BFMI) dans fit_diagnostics
 
 # Run all tests
 uv run pytest
@@ -64,13 +68,17 @@ uv run ruff format .
 > **Note Python 3.14 + uv + macOS** : uv marque tout le contenu de `.venv` comme
 > `UF_HIDDEN` (macOS), et Python 3.14 ignore désormais les fichiers `.pth` cachés.
 > Résultat : l'install éditable ne trouve pas `mpp` sans `--env-file .env`.
-> Fix permanent (optionnel) : ajouter `export UV_ENV_FILE=/path/to/MPP/.env`
-> dans `~/.zshrc`, puis `source ~/.zshrc`. Après ça, `uv run mpp-predict` fonctionnera directement.
+> `.env` est local (git-ignoré) : le créer avec `cp .env.example .env`, lancer depuis la racine.
+>
+> **Note PyTensor + macOS 27** : clang ≥ 21 rejette le drapeau `-ld64` que PyTensor ajoute
+> → toute compilation C échoue (`library 'd64' not found`), donc tout le bayésien.
+> `.env.example` pointe `PYTENSOR_FLAGS` vers `scripts/clang++-no-ld64`, qui retire ce drapeau.
 
 ## Architecture
 
 - `pyproject.toml` — project metadata, dependencies, and tool config (ruff, pytest)
-- `.env` — sets absolute `PYTHONPATH` so `uv run --env-file .env` finds the `mpp` package (Python 3.14 + uv + macOS workaround)
+- `.env.example` — template for the local, git-ignored `.env` (`PYTHONPATH=src` + PyTensor compiler shim)
+- `scripts/clang++-no-ld64` — clang++ shim stripping PyTensor's `-ld64` flag (macOS 27)
 - `src/mpp/confederations.py` — mapping statique équipe → confédération FIFA (utilisé par le modèle bayésien)
 - `src/mpp/bayesian_model.py` — modèle Poisson hiérarchique bayésien (PyMC), même interface que DixonColesModel
 - `uv.lock` — pinned dependency lockfile; commit this file

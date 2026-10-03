@@ -6,8 +6,7 @@ Usage:
 
 Sert site/index.html et expose deux endpoints :
     GET  /api/data  → {predictions, points, saisie}
-    POST /api/save  → écrit data/mes_pronos.json (pronos perso, résultats réels,
-                      score moyen des collègues)
+    POST /api/save  → écrit data/mes_pronos.json (pronos perso, résultats réels)
 
 Aucune dépendance externe (stdlib uniquement), bind 127.0.0.1 seulement.
 """
@@ -26,7 +25,7 @@ PREDICTIONS_FILE = DATA_DIR / "predictions.json"
 POINTS_FILE = DATA_DIR / "mpp_points.json"
 SAISIE_FILE = DATA_DIR / "mes_pronos.json"
 
-DEFAULT_SAISIE: dict = {"mes_scores": {}, "resultats": {}, "score_moyen_collegues": None}
+DEFAULT_SAISIE: dict = {"mes_scores": {}, "resultats": {}}
 
 
 def _load_json(path: Path, default):
