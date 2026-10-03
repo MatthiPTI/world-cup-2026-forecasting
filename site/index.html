@@ -226,7 +226,6 @@ async function init() {
       (a.group || "").localeCompare(b.group || ""));
   }
   SAISIE = Object.assign({ mes_scores: {}, resultats: {} }, DATA.saisie || {});
-  delete SAISIE.score_moyen_collegues;  // champ retiré (anciennes saisies)
   render();
   recompute();
 }

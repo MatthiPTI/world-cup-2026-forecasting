@@ -36,7 +36,7 @@ uv run --env-file .env mpp-market --min-prob 0.15        # value bets plus conse
 # Blend = picks tirés vers le marché (anti-biais calendrier). Edge = modèle PUR vs cotes (EV/Kelly).
 # Workflow : mpp-predict --model bayes  →  mpp-market  →  recharger le site.
 
-# Site local de comparaison (modèle vs mes pronos vs collègues)
+# Site local de comparaison (modèle vs mes pronos)
 uv run --env-file .env mpp-site
 
 # Back-test walk-forward (validation out-of-sample — la boucle de mesure)
