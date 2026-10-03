@@ -209,11 +209,15 @@ def compare_predictors(
     *,
     n_boot: int = 10_000,
     seed: int = 0,
+    min_clusters: int = 5,
 ) -> list[dict]:
     """All pairwise paired-bootstrap tests between `predictors`, for each metric.
 
     Holm correction is applied per metric across the pairs (the family is "which
     predictors differ"), on the cluster-bootstrap p-values (the conservative ones).
+    With fewer than `min_clusters` refit windows (e.g. a single tournament) the
+    cluster bootstrap is meaningless — with 2 clusters it can return p = 0 — so it is
+    skipped (None) and Holm falls back to the i.i.d. p-values.
     """
     outcomes = frame["outcome"].to_numpy()
     windows = frame["window"].to_numpy()
@@ -222,25 +226,29 @@ def compare_predictors(
         for p in predictors
     }
     pairs = [(a, b) for i, a in enumerate(predictors) for b in predictors[i + 1:]]
+    use_clusters = len(np.unique(windows)) >= min_clusters
     rows: list[dict] = []
     for metric in ("log_loss", "brier", "rps"):
         block = []
         for a, b in pairs:
             la, lb = losses[a][metric], losses[b][metric]
             iid = paired_bootstrap(la, lb, n_boot=n_boot, seed=seed)
-            clu = paired_bootstrap(la, lb, clusters=windows, n_boot=n_boot, seed=seed)
+            clu = (paired_bootstrap(la, lb, clusters=windows, n_boot=n_boot, seed=seed)
+                   if use_clusters else None)
             block.append({
                 "metric": metric, "a": a, "b": b,
                 "mean_diff": round(iid["mean_diff"], 5),
                 "ci_iid": [round(iid["ci_low"], 5), round(iid["ci_high"], 5)],
                 "p_iid": round(iid["p_value"], 4),
-                "ci_cluster": [round(clu["ci_low"], 5), round(clu["ci_high"], 5)],
-                "p_cluster": round(clu["p_value"], 4),
-                "n": iid["n"], "n_clusters": clu["n_units"],
+                "ci_cluster": [round(clu["ci_low"], 5), round(clu["ci_high"], 5)] if clu else None,
+                "p_cluster": round(clu["p_value"], 4) if clu else None,
+                "n": iid["n"], "n_clusters": int(len(np.unique(windows))),
                 "mde_80": round(minimum_detectable_effect(la - lb), 5),
             })
-        for row, adj in zip(block, holm([r["p_cluster"] for r in block])):
-            row["p_cluster_holm"] = round(adj, 4)
+        key = "p_cluster" if use_clusters else "p_iid"
+        for row, adj in zip(block, holm([r[key] for r in block])):
+            row["p_holm"] = round(adj, 4)
+            row["holm_on"] = key
         rows.extend(block)
     return rows
 
@@ -545,14 +553,16 @@ def _print_report(res: dict) -> None:
               f"{m['rps']:>9}{m['accuracy']:>10}{exact:>8}")
 
     print("\n  Significativité — bootstrap apparié, diff = A − B (diff<0 → A meilleur)")
-    print("  IC 95 % i.i.d. (par match) et par fenêtre de refit ; p Holm sur les p par fenêtre")
+    print("  IC 95 % i.i.d. (par match) et par fenêtre de refit ; p Holm sur les p par fenêtre "
+          "(sur les p i.i.d. si < 5 fenêtres)")
     print(f"  {'métrique':<9}{'A vs B':<24}{'diff':>9}{'IC iid':>22}{'IC fenêtre':>22}"
           f"{'p Holm':>8}{'MDE':>8}")
     for r in res["significance"]:
         ci_i = f"[{r['ci_iid'][0]:+.4f}, {r['ci_iid'][1]:+.4f}]"
-        ci_c = f"[{r['ci_cluster'][0]:+.4f}, {r['ci_cluster'][1]:+.4f}]"
+        ci_c = (f"[{r['ci_cluster'][0]:+.4f}, {r['ci_cluster'][1]:+.4f}]"
+                if r["ci_cluster"] else "n/a")
         print(f"  {r['metric']:<9}{r['a'] + ' vs ' + r['b']:<24}{r['mean_diff']:>+9.4f}"
-              f"{ci_i:>22}{ci_c:>22}{r['p_cluster_holm']:>8}{r['mde_80']:>8.4f}")
+              f"{ci_i:>22}{ci_c:>22}{r['p_holm']:>8}{r['mde_80']:>8.4f}")
     if c["n_windows"] < 10:
         print(f"  ⚠ {c['n_windows']} fenêtres seulement : l'IC par fenêtre est peu fiable "
               "(réduire --refit-freq).")
@@ -644,6 +654,73 @@ def main() -> None:
     frame.to_csv(preds_path, index=False)
     print(f"  → {metrics_path}")
     print(f"  → {preds_path}\n")
+
+
+def report_from_predictions(
+    frame: pd.DataFrame,
+    *,
+    tournaments: list[str] | None = None,
+    n_boot: int = 10_000,
+    seed: int = 0,
+) -> dict:
+    """Recompute metrics + significance from a saved predictions frame (no refit).
+
+    Used for sub-population analyses (e.g. only the World Cup) and to regenerate the
+    README tables. Fitted models are detected from the `<name>_exact` columns.
+    """
+    if "tournament" not in frame.columns:  # files written before the column existed
+        from mpp.data import RESULTS_FILE
+
+        res = pd.read_csv(RESULTS_FILE, usecols=["date", "home_team", "away_team", "tournament"])
+        res = res.rename(columns={"home_team": "home", "away_team": "away"})
+        frame = frame.merge(res, on=["date", "home", "away"], how="left")
+    if tournaments:
+        frame = frame[frame["tournament"].isin(tournaments)]
+    if frame.empty:
+        raise RuntimeError("No match left after filtering.")
+
+    models = [c[: -len("_exact")] for c in frame.columns if c.endswith("_exact")]
+    outcomes = frame["outcome"].to_numpy()
+    metrics = {}
+    for name in models + list(BASELINES):
+        cols = [f"{name}_home", f"{name}_draw", f"{name}_away"]
+        metrics[name] = summarise(frame[cols].to_numpy(), outcomes)
+    return {
+        "n": len(frame),
+        "n_windows": int(frame["window"].nunique()),
+        "tournaments": tournaments,
+        "metrics": metrics,
+        "significance": compare_predictors(frame, models + ["elo"], n_boot=n_boot, seed=seed),
+    }
+
+
+def main_report() -> None:
+    p = argparse.ArgumentParser(
+        description="Metrics + paired bootstrap from a saved back-test predictions CSV."
+    )
+    p.add_argument("predictions", help="e.g. data/backtest_full_predictions.csv")
+    p.add_argument("--tournament", action="append", default=None,
+                   help="Keep only this tournament (repeatable), e.g. 'FIFA World Cup'.")
+    p.add_argument("--n-boot", type=int, default=10_000)
+    p.add_argument("--seed", type=int, default=0)
+    args = p.parse_args()
+
+    rep = report_from_predictions(pd.read_csv(args.predictions), tournaments=args.tournament,
+                                  n_boot=args.n_boot, seed=args.seed)
+    print(f"\n  {rep['n']} matchs, {rep['n_windows']} fenêtres"
+          + (f" — {', '.join(rep['tournaments'])}" if rep["tournaments"] else ""))
+    print(f"\n  {'prédicteur':<20}{'log_loss':>10}{'brier':>9}{'rps':>9}{'accuracy':>10}")
+    for name, m in rep["metrics"].items():
+        print(f"  {name:<20}{m['log_loss']:>10}{m['brier']:>9}{m['rps']:>9}{m['accuracy']:>10}")
+    print(f"\n  {'métrique':<9}{'A vs B':<34}{'diff':>9}{'IC iid':>22}{'IC fenêtre':>22}"
+          f"{'p Holm':>8}{'MDE':>8}")
+    for r in rep["significance"]:
+        ci_i = f"[{r['ci_iid'][0]:+.4f}, {r['ci_iid'][1]:+.4f}]"
+        ci_c = (f"[{r['ci_cluster'][0]:+.4f}, {r['ci_cluster'][1]:+.4f}]"
+                if r["ci_cluster"] else "n/a")
+        print(f"  {r['metric']:<9}{r['a'] + ' vs ' + r['b']:<34}{r['mean_diff']:>+9.4f}"
+              f"{ci_i:>22}{ci_c:>22}{r['p_holm']:>8}{r['mde_80']:>8.4f}")
+    print()
 
 
 if __name__ == "__main__":

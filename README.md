@@ -5,13 +5,19 @@ A football forecasting engine I built for the 2026 World Cup group stage. It com
 **Elo** baseline. All three are evaluated in one **walk-forward back-test**, and the gaps
 between them are tested with **paired bootstrap tests**.
 
-The headline result is a negative one, and I report it as such:
+Results in one paragraph:
 
-> __RESULTS_TLDR__
+> On 852 out-of-sample competitive matches (Dec 2024 to Aug 2026, including the 104 matches
+> of the 2026 World Cup), the Bayesian model **beats Dixon-Coles significantly** (−0.023
+> nats of log-loss, Holm-adjusted p = 0.012). It is also **ahead of a plain Elo baseline
+> (−0.011 nats), but that gap is not statistically significant**: the sample could only
+> have detected gaps of about 0.03 nats. Fixing the sampler's divergences made the
+> posterior trustworthy, but it **did not change predictive accuracy** (|Δ| < 0.001 nats).
 
 Most of the work here went into measuring things properly: the leakage-free back-test,
-the paired significance tests, and the sampler diagnostics. That work is what made the
-negative result clear.
+the paired significance tests, and the sampler diagnostics. Without that work, the
+earlier claim "the Bayesian model beats Elo" (a 0.001-nat gap) would have gone out
+unchecked.
 
 ---
 
@@ -110,11 +116,112 @@ wider.
 
 ## Results
 
-__RESULTS_SECTION__
+Window: checkpoints every 45 days from 2024-12-20 to 2026-08-31, giving 13 refit windows
+and **852 scored matches** (77 skipped because a team was below the data threshold).
+The Bayesian model was fitted with NUTS (4 chains × 1000 draws, 1000 tuning steps) at
+every checkpoint. Lower is better for all three scores.
+
+| Predictor | Log-loss | Brier | RPS | Accuracy |
+|---|---:|---:|---:|---:|
+| **Bayesian hierarchical** | **0.8156** | **0.4778** | **0.1588** | **0.630** |
+| Elo | 0.8264 | 0.4844 | 0.1616 | 0.627 |
+| Dixon-Coles | 0.8383 | 0.4912 | 0.1645 | 0.627 |
+| Base rate (constant H/D/A) | 1.0509 | 0.6347 | 0.2339 | 0.470 |
+
+**Are the gaps real?** Paired bootstrap on per-match log-loss (10,000 resamples). Δ = A − B,
+negative means A is better. Holm correction is applied across all model pairs.
+
+| A vs B | Δ log-loss | 95 % CI (matches) | 95 % CI (refit windows) | Holm p | MDE |
+|---|---:|---|---|---:|---:|
+| Bayesian vs Dixon-Coles | −0.0226 | [−0.032, −0.014] | [−0.045, −0.006] | **0.012** | 0.013 |
+| Bayesian vs Elo | −0.0108 | [−0.033, +0.011] | [−0.038, +0.019] | 1.0 | 0.031 |
+| Dixon-Coles vs Elo | +0.0118 | [−0.011, +0.035] | [−0.021, +0.043] | 1.0 | 0.033 |
+
+Brier and RPS give the same verdicts: Bayesian beats Dixon-Coles (Holm p = 0.005 and
+0.020), and every other gap is non-significant.
+
+How to read this:
+
+- **The Bayesian model beats Dixon-Coles**, under both resampling schemes and on all three
+  scores. Partial pooling and the Elo prior are doing real work: Dixon-Coles, fitted per
+  team by maximum likelihood, overfits teams with few informative matches.
+- **Bayesian vs Elo is undecided, not a tie.** The point estimate favours the Bayesian
+  model by 0.011 nats, but at n = 852 only differences of about 0.03 nats could be
+  detected reliably. Saying "it beats Elo" would overclaim. Saying "it is no better than
+  Elo" would also overclaim. The honest statement is that this sample cannot separate
+  them.
+- **Calibration** is good: in every favourite-probability bin, the Bayesian model's
+  predicted and realised win rates differ by at most 0.04. The per-confederation bias,
+  the direct measure of the soft-schedule problem, is at most 0.016 in absolute value.
+
+**World Cup 2026 only** (104 matches, the target application):
+
+| Predictor | Log-loss | Brier | RPS | Accuracy |
+|---|---:|---:|---:|---:|
+| **Bayesian hierarchical** | **0.871** | **0.513** | **0.165** | **0.625** |
+| Elo | 0.910 | 0.542 | 0.179 | 0.587 |
+| Dixon-Coles | 0.936 | 0.563 | 0.188 | 0.567 |
+
+Same ranking, larger gaps. Bayesian vs Dixon-Coles is significant (Δ = −0.065, CI
+[−0.106, −0.023], Holm p = 0.023). Bayesian vs Elo (Δ = −0.039, CI [−0.115, +0.036]) is
+not: 104 matches can only detect gaps of about 0.11 nats. These 104 matches fall into
+just 2 refit windows, so only the per-match bootstrap is meaningful here. The code skips
+the cluster bootstrap below 5 clusters, because with 2 clusters it returns nonsense
+(including p = 0).
+
+Every number above can be regenerated without refitting:
+
+```bash
+uv run --env-file .env mpp-backtest-report data/backtest_full_predictions.csv
+uv run --env-file .env mpp-backtest-report data/backtest_full_predictions.csv --tournament "FIFA World Cup"
+```
 
 ## Diagnosing the NUTS divergences
 
-__NUTS_SECTION__
+The first version of the Bayesian model sampled with warnings. At the latest checkpoint
+it produced **46 divergent transitions out of 1000 (4.6 %)** and R-hat up to 1.022.
+
+**Where were the divergences?** I located each divergent draw within the marginal
+distribution of every hyperparameter. They were **not** at small `τ`, where the classic
+hierarchical funnel puts them. They sat at **large `τ`** (median rank: 90th percentile
+for `τ_def`, and 98th for `τ_att` once `target_accept` was raised).
+
+**Why.** The original model was *non-centred*: `conf_att = τ · z`, with `z ~ N(0, 1)`.
+That is the right choice when groups have little data. Here every confederation has
+thousands of matches, so `conf_att` is pinned by the likelihood, and `z = conf_att / τ`
+has to move in exact inverse proportion to `τ`. The result is a curved ridge in
+`(τ, z)` that NUTS cannot follow with a single step size. A second, smaller issue: the
+mean of `z` was identified only by the prior (its posterior sd was 0.41 = 1/√6, exactly
+the prior value). That is a flat direction the sampler wasted effort on.
+
+**The fix** is a centred parameterisation: `conf_att ~ ZeroSumNormal(τ)` and
+`att_dev ~ Normal(0, σ)`. `ZeroSumNormal` removes the redundant direction as well.
+
+| Latest checkpoint, 4 chains × 1000 | Divergences | max R-hat | min ESS (bulk) | E-BFMI | Time |
+|---|---:|---:|---:|---:|---:|
+| Non-centred, `target_accept` 0.8 | 46 / 1000 (2 chains) | 1.022 | 219 | 0.59 | 34 s |
+| Non-centred, `target_accept` 0.9 | 36 | 1.007 | 546 | 0.61 | 78 s |
+| Non-centred, `target_accept` 0.95 | 2 | 1.006 | 532 | 0.62 | 135 s |
+| **Centred** (`target_accept` 0.8) | **0** | **1.006** | **1080** | **0.95** | **48 s** |
+
+Raising `target_accept` only hides the problem, at about 3× the cost. Changing the
+geometry removes it. Across all 13 back-test refits, the centred model had **0
+divergences** in every window, R-hat ≤ 1.012, ESS ≥ 569 and E-BFMI ≥ 0.87. The
+non-centred one had between 64 and 708 divergences per window out of 4000 draws, and in
+its worst window R-hat reached 1.32 with an ESS of 9.
+
+**Did it matter for prediction?** I kept the old version as a separate back-test model
+(`bayes_noncentered`) so the two could be compared on identical matches. Δ log-loss =
+−0.0002, with a CI of [−0.0007, +0.0002]: the two are indistinguishable. The plug-in
+predictions use posterior *means* of attack and defence, and those means were robust
+even when the chains mixed badly. The fix matters for anything that relies on the
+**posterior spread**: parameter uncertainty, posterior-predictive score matrices, and
+the "how much does the model trust Elo" coefficient `β`.
+
+**One trap.** The centred form is wrong for MAP. Its joint density is unbounded as
+`σ → 0` (the funnel tip), so the optimiser collapses every team to average. The default
+parameterisation therefore depends on the inference method: centred for NUTS,
+non-centred for MAP and ADVI. A regression test pins this.
 
 ## Limitations and next steps
 
@@ -145,7 +252,7 @@ uv sync
 cp .env.example .env        # see below
 uv run --env-file .env pytest
 
-# Full comparison (NUTS for every refit window, ~30 min on a laptop)
+# Full comparison: one NUTS fit per Bayesian variant per refit window (slow)
 uv run --env-file .env mpp-backtest --models dixoncoles bayes bayes_noncentered \
     --start 2024-12-20 --end 2026-08-31 --out-prefix backtest_full
 
@@ -180,6 +287,7 @@ src/mpp/
   fixtures.py        the 72 group-stage fixtures
   predict.py         CLI: fit + predict the World Cup
 tests/               pytest suite (no network; Bayesian tests use MAP or tiny NUTS runs)
+scripts/             clang++ shim for PyTensor on macOS 27
 ```
 
 ## License

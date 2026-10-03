@@ -46,6 +46,8 @@ uv run --env-file .env mpp-backtest --apply-adjustments      # mesure l'impact d
 uv run --env-file .env mpp-backtest --start 2023-01-01 --refit-freq 60
 uv run --env-file .env mpp-backtest --models bayes --bayes-inference map   # rapide, debug
 # Tous les modèles sont notés en UN passage sur les mêmes matchs (pertes appariées).
+# Recalcul sans refit (filtre tournoi possible) :
+#   uv run --env-file .env mpp-backtest-report data/backtest_full_predictions.csv --tournament "FIFA World Cup"
 # Sorties : data/<prefix>_metrics.json + data/<prefix>_predictions.csv (--out-prefix, défaut backtest)
 # Métriques : log-loss / Brier / RPS / accuracy / score exact vs baselines (Elo, base-rate)
 # Significativité : bootstrap apparié (par match + par fenêtre de refit), Holm sur les paires

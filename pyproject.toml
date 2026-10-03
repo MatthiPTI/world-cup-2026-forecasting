@@ -20,6 +20,7 @@ mpp-predict = "mpp.predict:main"
 mpp-optimize = "mpp.optimize:main"
 mpp-site = "mpp.site:main"
 mpp-backtest = "mpp.backtest:main"
+mpp-backtest-report = "mpp.backtest:main_report"
 mpp-market = "mpp.market:main"
 
 [build-system]

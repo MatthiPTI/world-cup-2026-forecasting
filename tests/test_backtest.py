@@ -143,5 +143,16 @@ def test_compare_predictors_structure():
         frame.update({f"{name}_home": p[:, 0], f"{name}_draw": p[:, 1], f"{name}_away": p[:, 2]})
     rows = compare_predictors(pd.DataFrame(frame), ["x", "y", "elo"], n_boot=200)
     assert len(rows) == 3 * 3  # 3 pairs × 3 metrics
-    assert {"mean_diff", "ci_iid", "ci_cluster", "p_cluster_holm", "mde_80"} <= set(rows[0])
-    assert all(r["p_cluster_holm"] >= r["p_cluster"] for r in rows)
+    assert {"mean_diff", "ci_iid", "ci_cluster", "p_holm", "mde_80"} <= set(rows[0])
+    assert all(r["p_holm"] >= r["p_cluster"] for r in rows)
+
+
+def test_compare_predictors_skips_cluster_bootstrap_with_few_windows():
+    rng = np.random.default_rng(0)
+    n = 40
+    frame = {"outcome": rng.integers(0, 3, n), "window": np.repeat([0, 1], n // 2)}
+    for name in ("x", "y"):
+        p = rng.dirichlet([1, 1, 1], size=n)
+        frame.update({f"{name}_home": p[:, 0], f"{name}_draw": p[:, 1], f"{name}_away": p[:, 2]})
+    rows = compare_predictors(pd.DataFrame(frame), ["x", "y"], n_boot=200)
+    assert all(r["ci_cluster"] is None and r["holm_on"] == "p_iid" for r in rows)
